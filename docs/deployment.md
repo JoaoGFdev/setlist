@@ -1,5 +1,7 @@
 # Deploy on Cloudflare Free
 
+For Cloudflare Workers Builds, set `PNPM_VERSION=12.14.0` under **Settings > Build > Build Variables and Secrets** so dependency installation matches local development. Keep this value aligned with `packageManager` in `package.json`.
+
 Target: one TanStack Start Worker, static assets, one D1 database accessed with Drizzle, and Clerk authentication. No paid queue, VM, external database, or transfer subscription is required. This guide prepares your own Cloudflare/Clerk/provider accounts; creating the source code does not create those resources or connect your accounts automatically.
 
 The owner has a domain and will supply it later. Replace the example hostname throughout with that domain; never register the literal example callbacks. A stable domain keeps Clerk and provider redirects consistent across deployments.
@@ -14,7 +16,7 @@ Clerk sign-in is separate from connecting Spotify/YouTube. The app never treats 
 
 ## Local development
 
-1. Install the supported Node.js version from `package.json`, then run `pnpm install`.
+1. Install the supported Node.js version from `package.json` and pnpm 12.14.0 (pinned in `packageManager`), then run `pnpm install`.
 2. Copy `.env.example` to `.env.local`. Vite and Cloudflare both load this file for local development. Only `VITE_` variables are exposed to the browser; keep server secrets unprefixed. Keep `.env.local` out of Git. Do not create `.dev.vars`, because it takes precedence and prevents Cloudflare from loading dotenv files.
 3. Add Clerk's publishable key and local secret key. Generate a 32-byte base64 encryption key, for example with `openssl rand -base64 32`, and place it in `TOKEN_ENCRYPTION_KEY` in `.env.local`. Do not paste keys into chat.
 4. Set `APP_URL=http://127.0.0.1:5173` (or the exact local address/port configured by the app). Add Spotify and Google OAuth client settings to `.env.local`.
