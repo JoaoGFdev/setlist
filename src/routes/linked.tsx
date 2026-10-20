@@ -1,11 +1,15 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { LinkedPlaylists } from '@/components/pages/linked-playlists';
+import { PageHeader } from '@/components/pages/page-header';
+import { RequireSignIn } from '@/components/pages/require-sign-in';
 
 export const Route = createFileRoute('/linked')({
   head: () => ({ meta: [{ title: 'Linked playlists — Setlist' }] }),
-  component: Page,
+  component: LinkedPage,
 });
 
-function Page() {
-  return <Empty><EmptyHeader><EmptyTitle>Linked playlists</EmptyTitle><EmptyDescription>Coming soon.</EmptyDescription></EmptyHeader></Empty>;
+const header = <PageHeader title="Linked playlists" description="See which playlists already have a counterpart on the other service." />;
+
+export function LinkedPage() {
+  return <RequireSignIn header={header}>{() => <>{header}<LinkedPlaylists /></>}</RequireSignIn>;
 }
