@@ -4,11 +4,14 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authState = vi.hoisted(() => ({ userId: null as string | null }));
+const clerkAuthorize = vi.hoisted(() => vi.fn(async () => ({ verification: {} })));
 
 vi.mock('@clerk/tanstack-react-start', async () => {
   const ReactModule = await import('react');
   return {
     useAuth: () => ({ isLoaded: true, userId: authState.userId }),
+    useUser: () => ({ user: { externalAccounts: [{ provider: 'spotify', reauthorize: clerkAuthorize }, { provider: 'google', reauthorize: clerkAuthorize }], reload: async () => {}, createExternalAccount: clerkAuthorize } }),
+    useReverification: (action: unknown) => action,
     SignInButton: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('span', null, children),
     UserButton: () => ReactModule.createElement('span', { 'aria-label': 'Signed in user' }, 'User'),
   };
@@ -47,8 +50,26 @@ const requestPath = (input: RequestInfo | URL) => String(input);
 const method = (init?: RequestInit) => init?.method || 'GET';
 
 describe('authenticated workspace UI', () => {
-  beforeEach(() => { authState.userId = null; });
+  beforeEach(() => { authState.userId = null; clerkAuthorize.mockClear(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it('requests playlist consent through an already linked Clerk account', async () => {
+    authState.userId = 'clerk-user-1';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = requestPath(input);
+      if (path === '/api/status') return json({ ...status, accounts: { spotify: null, youtube: null } });
+      if (path === '/api/jobs') return json([]);
+      if (path === '/api/accounts/spotify/connect') return json({ ok: true });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    const spotify = await screen.findByRole('region', { name: 'Spotify library' });
+    await userEvent.setup().click(within(spotify).getByRole('button', { name: 'Allow playlist access' }));
+    await waitFor(() => expect(clerkAuthorize).toHaveBeenCalledOnce());
+    expect(clerkAuthorize).toHaveBeenCalledWith({ additionalScopes: ['playlist-read-private', 'playlist-read-collaborative', 'playlist-modify-private', 'playlist-modify-public'], redirectUrl: `${window.location.origin}/sso-callback` });
+    expect(fetchMock.mock.calls.some(([input]) => requestPath(input) === '/api/accounts/spotify/connect')).toBe(true);
+  });
 
   it('does not read private APIs while signed out, then loads the workspace after sign-in', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

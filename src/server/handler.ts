@@ -62,10 +62,15 @@ export async function dispatchApi(request: Request, env: AppEnv, userId: string)
     const path = url.pathname;
 
     if (request.method === 'GET' && path === '/api/status') {
-      const [spotify, youtube] = await Promise.all([store.credentials('spotify'), store.credentials('youtube')]);
+      const account = async (provider: Provider) => {
+        try { return { account: (await service.credentials(provider))?.account || null, error: null }; }
+        catch (error) { return { account: null, error: errorMessage(error) }; }
+      };
+      const [spotify, youtube] = await Promise.all([account('spotify'), account('youtube')]);
       const result: Status = {
-        accounts: { spotify: spotify?.account || null, youtube: youtube?.account || null },
-        configured: { spotify: providerConfigured('spotify', env), youtube: providerConfigured('youtube', env) },
+        accounts: { spotify: spotify.account, youtube: youtube.account },
+        connectionErrors: { spotify: spotify.error, youtube: youtube.error },
+        configured: { spotify: Boolean(env.CLERK_SECRET_KEY) || providerConfigured('spotify', env), youtube: Boolean(env.CLERK_SECRET_KEY) || providerConfigured('youtube', env) },
         callbacks: { spotify: callbackUrl('spotify', env), youtube: callbackUrl('youtube', env) },
       };
       return json(result);
@@ -107,6 +112,16 @@ export async function dispatchApi(request: Request, env: AppEnv, userId: string)
       const query = requiredString(input.query, 'Search query', 200, true);
       return json(await transfers.search(id, index, query));
     }
+    const connect = path.match(/^\/api\/accounts\/([^/]+)\/connect$/);
+    if (request.method === 'POST' && connect) {
+      const provider = decodeURIComponent(connect[1]);
+      if (!isProvider(provider)) throw new ServiceError('Unknown music service.');
+      const token = await store.acquireLease('workspace', 60_000);
+      if (!token) throw new ServiceError('Another operation is active. Wait a moment, then retry.', 409);
+      try { await store.delete(`connection-disabled:${provider}`); }
+      finally { await store.releaseLease('workspace', token); }
+      return json({ ok: true });
+    }
     const disconnect = path.match(/^\/api\/accounts\/([^/]+)\/disconnect$/);
     if (request.method === 'POST' && disconnect) {
       const provider = decodeURIComponent(disconnect[1]);
@@ -117,6 +132,7 @@ export async function dispatchApi(request: Request, env: AppEnv, userId: string)
         await store.assertLease('workspace', token);
         await store.deleteWorkspaceDocuments('workspace', token);
         await store.deleteCredentials(provider);
+        await store.set(`connection-disabled:${provider}`, { disabled: true });
       }
       finally { await store.releaseLease('workspace', token); }
       return json({ ok: true });

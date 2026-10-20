@@ -53,7 +53,7 @@ export class Transfers {
   }
   private async assertAccounts(job: JobSummary) {
     const [source, destination] = await Promise.all([
-      this.store.credentials(job.source), this.store.credentials(job.destination),
+      this.providers.credentials(job.source), this.providers.credentials(job.destination),
     ]);
     if (source?.account.id !== job.sourceAccount || destination?.account.id !== job.destinationAccount) {
       throw new ServiceError('Reconnect the original accounts for this transfer.', 409);
@@ -70,7 +70,7 @@ export class Transfers {
     return this.withLease(async (token) => {
       const destination = source === 'spotify' ? 'youtube' : 'spotify';
       const [sourceCredentials, destinationCredentials] = await Promise.all([
-        this.store.credentials(source), this.store.credentials(destination),
+        this.providers.credentials(source), this.providers.credentials(destination),
       ]);
       if (!sourceCredentials || !destinationCredentials) throw new ServiceError('Connect both accounts before starting a transfer.', 401);
       const playlist = await this.providers.playlist(source, playlistId);
@@ -231,8 +231,8 @@ export class Transfers {
   }
 
   private async transferStep(job: JobSummary, token: string): Promise<JobSummary> {
-    const expectedData = await this.store.get<{ ids: string[] }>(EXPECTED_KEY(job.id));
-    const expected = expectedData?.ids;
+    const expectedData = await this.store.get<string[] | { ids: string[] }>(EXPECTED_KEY(job.id));
+    const expected = Array.isArray(expectedData) ? expectedData : expectedData?.ids;
     if (!expected?.length) throw new ServiceError('The approved transfer list is missing. Review and approve this transfer again.', 409);
     if (!job.destinationId) return this.discoverOrCreate(job, token);
     if (job.reconcilePosition < 0) throw new ServiceError('Invalid saved reconciliation position.', 500);
@@ -291,8 +291,8 @@ export class Transfers {
     return job;
   }
   private async reconcilePage(job: JobSummary, token: string): Promise<JobSummary> {
-    const expectedData = await this.store.get<{ ids: string[] }>(EXPECTED_KEY(job.id));
-    const expected = expectedData?.ids;
+    const expectedData = await this.store.get<string[] | { ids: string[] }>(EXPECTED_KEY(job.id));
+    const expected = Array.isArray(expectedData) ? expectedData : expectedData?.ids;
     if (!expected?.length) throw new ServiceError('The approved transfer list is missing. Review and approve this transfer again.', 409);
     const page = await this.providers.destinationPage(job.destination, job.destinationId!, job.reconcileCursor);
     await this.assertLease(token);

@@ -68,6 +68,24 @@ function job(id: string): JobSummary {
 describe('HTTP dispatch security and tenant contract', () => {
   beforeAll(migrate);
 
+  it('disconnect clears transfer data and keeps each library disabled until explicitly reconnected', async () => {
+    const userId = 'clerk-disconnect-user';
+    const workspace = store(userId);
+    await workspace.set('connection-disabled:youtube', { disabled: true });
+    await workspace.set('job:disconnected-transfer', job('disconnected-transfer'));
+    await workspace.saveCredentials('spotify', { access_token: 'test-token', expiresAt: Date.now() + 60_000, account: { id: 'spotify-account', name: 'Listener' } });
+    const disconnected = await dispatchApi(request('/api/accounts/spotify/disconnect', { method: 'POST', origin: appEnv.APP_URL }), appEnv, userId);
+    expect(disconnected.status).toBe(200);
+    expect(await workspace.get('job:disconnected-transfer')).toBeUndefined();
+    expect(await workspace.credentials('spotify')).toBeUndefined();
+    expect(await workspace.get('connection-disabled:spotify')).toEqual({ disabled: true });
+    expect(await workspace.get('connection-disabled:youtube')).toEqual({ disabled: true });
+    const connected = await dispatchApi(request('/api/accounts/spotify/connect', { method: 'POST', origin: appEnv.APP_URL }), appEnv, userId);
+    expect(connected.status).toBe(200);
+    expect(await workspace.get('connection-disabled:spotify')).toBeUndefined();
+    expect(await workspace.get('connection-disabled:youtube')).toEqual({ disabled: true });
+  });
+
   it('returns only the authenticated user’s accounts and jobs, including for a guessed job ID', async () => {
     const userA = `http-user-a-${crypto.randomUUID()}`;
     const userB = `http-user-b-${crypto.randomUUID()}`;

@@ -11,13 +11,20 @@
       "binding": "DB",
       "database_name": "setlist",
       "database_id": "f9ac2239-0112-4405-98f0-1f3c7c6d5cfa",
-      "migrations_dir": "drizzle"
-    }
+      "migrations_dir": "drizzle",
+    },
   ],
+  "observability": {
+    "logs": {
+      "enabled": false,
+      "invocation_logs": true,
+    },
+  },
   "triggers": { "crons": ["0 0 * * *"] },
   "vars": {
+    "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc2V0bGlzdC5qb2FvZ2YuZGV2JA",
     "APP_URL": "https://setlist.joaogf.dev",
     "GOOGLE_CLIENT_ID": "461683360007-3377slq154fg3ncoblgk81ea9tabtin4.apps.googleusercontent.com",
-    "SPOTIFY_CLIENT_ID": "d109dfb8abe548bc96fb2f5cbfc03f62"
-  }
+    "SPOTIFY_CLIENT_ID": "d109dfb8abe548bc96fb2f5cbfc03f62",
+  },
 }
