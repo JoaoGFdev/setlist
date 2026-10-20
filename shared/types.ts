@@ -48,6 +48,8 @@ export interface JobMetadata {
   phase: JobPhase;
   state: JobState;
   message?: string;
+  nextStepAt?: number;
+  rateLimitAttempts?: number;
   sourceCursor?: string;
   sourcePosition: number;
   sourceDone: boolean;

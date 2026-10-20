@@ -147,6 +147,7 @@ describe('authenticated workspace UI', () => {
     const created = fullJob('job-created', { name: 'Night drive', phase: 'loading', state: 'running', items: [] });
     const reviewed = fullJob('job-created', { name: 'Night drive', phase: 'review', state: 'idle', matchedCount: 1, selectedCount: 1, items: [{ ...item, candidates: [{ id: 'yt-track', title: 'Midnight City', artist: 'M83', url: 'https://youtube.com/watch?v=yt-track', score: 98 }], searched: true, selected: { id: 'yt-track', title: 'Midnight City', artist: 'M83', url: 'https://youtube.com/watch?v=yt-track', score: 98 } }] });
     let stepCount = 0;
+    const stepTimes: number[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = requestPath(input); const requestMethod = method(init);
       if (path === '/api/status') return json(status);
@@ -154,6 +155,7 @@ describe('authenticated workspace UI', () => {
       if (path === '/api/playlists/spotify' || path === '/api/playlists/youtube') return json({ items: [playlist] });
       if (path === '/api/jobs' && requestMethod === 'POST') return json(created, 201);
       if (path === '/api/jobs/job-created/step' && requestMethod === 'POST') {
+        stepTimes.push(Date.now());
         stepCount++;
         return json(stepCount === 1 ? summary(created, { phase: 'matching', totalCount: 1 }) : summary(created, { phase: 'review', state: 'idle', matchedCount: 1, selectedCount: 1 }));
       }
@@ -167,8 +169,9 @@ describe('authenticated workspace UI', () => {
     await screen.findAllByText('Night drive');
     await user.click(within(screen.getByRole('region', { name: 'Spotify library' })).getByRole('button', { name: /transfer/i }));
     await user.click(screen.getByRole('button', { name: 'Find matches' }));
-    expect(await screen.findByText('Matches are suggestions. Open a result to check it, choose another candidate, or skip the track.')).toBeTruthy();
+    expect(await screen.findByText('Matches are suggestions. Open a result to check it, choose another candidate, or skip the track.', {}, { timeout: 4_000 })).toBeTruthy();
     expect(stepCount).toBe(2);
+    expect(stepTimes[1] - stepTimes[0]).toBeGreaterThanOrEqual(1_500);
     expect(fetchMock.mock.calls.filter(([input, init]) => requestPath(input) === '/api/jobs/job-created' && method(init) === 'GET')).toHaveLength(1);
   });
 
@@ -203,6 +206,40 @@ describe('authenticated workspace UI', () => {
     finishStep(json(summary(jobOne, { matchedCount: 1 })));
     await waitFor(() => expect(stepCount).toBe(1));
     expect(picker.textContent).toContain('Saved transfer');
+  });
+
+  it('waits for an active step to checkpoint before pausing and stops further steps', async () => {
+    const jobOne = fullJob('job-1');
+    const jobTwo = fullJob('job-2', { name: 'Saved transfer', state: 'paused', message: 'Waiting to resume.' });
+    let finishStep!: (response: Response) => void;
+    const pendingStep = new Promise<Response>(resolve => { finishStep = resolve; });
+    let stepCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = requestPath(input); const requestMethod = method(init);
+      if (path === '/api/status') return json(status);
+      if (path === '/api/jobs' && requestMethod === 'GET') return json([summary(jobOne), summary(jobTwo)]);
+      if (path === '/api/playlists/spotify' || path === '/api/playlists/youtube') return json({ items: [] });
+      if (path === '/api/jobs/job-1' && requestMethod === 'GET') return json(jobOne);
+      if (path === '/api/jobs/job-2' && requestMethod === 'GET') return json(jobTwo);
+      if (path === '/api/jobs/job-1/pause') return json({ ...jobOne, state: 'paused', message: 'Transfer paused. Progress is saved.' });
+      if (path === '/api/jobs/job-1/resume' && requestMethod === 'POST') return json(jobOne);
+      if (path === '/api/jobs/job-1/step' && requestMethod === 'POST') { stepCount++; return pendingStep; }
+      throw new Error(`Unexpected request: ${requestMethod} ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    authState.userId = 'clerk-user-1';
+    const user = userEvent.setup();
+    renderApp();
+    await screen.findByRole('heading', { name: 'Night drive' });
+    // A running transfer picks up again on its own when opened.
+    await waitFor(() => expect(stepCount).toBe(1));
+    await user.click(screen.getByRole('button', { name: 'Pause transfer' }));
+    expect(screen.getByRole('button', { name: 'Pausing…' }).hasAttribute('disabled')).toBe(true);
+    expect(fetchMock.mock.calls.some(([input]) => requestPath(input).endsWith('/pause'))).toBe(false);
+    finishStep(json(summary(jobOne, { matchedCount: 1 })));
+    expect(await screen.findByRole('button', { name: 'Resume transfer' })).toBeTruthy();
+    expect(stepCount).toBe(1);
+    expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).endsWith('/pause'))).toHaveLength(1);
   });
 
   describe('library list', () => {

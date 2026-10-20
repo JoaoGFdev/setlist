@@ -15,7 +15,7 @@ const configs = {
 } as const;
 
 export class ServiceError extends Error {
-  constructor(message: string, public status = 400, public reason?: string) { super(message); this.name = 'ServiceError'; }
+  constructor(message: string, public status = 400, public reason?: string, public retryAt?: number) { super(message); this.name = 'ServiceError'; }
 }
 function constantTimeEqual(left: string, right: string): boolean {
   const a = new TextEncoder().encode(left); const b = new TextEncoder().encode(right);
@@ -59,7 +59,13 @@ async function readResponse(response: Response): Promise<Json> {
     const first = Array.isArray(error.errors) ? record(error.errors[0]) : {};
     const reason = str(first.reason);
     if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded') throw new ServiceError('YouTube daily quota reached. Progress is saved. Resume after the quota resets at midnight Pacific time.', 429);
-    if (response.status === 429) throw new ServiceError(`Rate limit reached. Progress is saved. Retry after ${response.headers.get('retry-after') || 'a few'} seconds.`, 429);
+    if (response.status === 429 || ['rateLimitExceeded', 'userRateLimitExceeded'].includes(reason)) {
+      const header = response.headers.get('retry-after');
+      const seconds = header && /^\d+(\.\d+)?$/.test(header) ? Number(header) * 1000 : NaN;
+      const date = header ? Date.parse(header) : NaN;
+      const retryAt = Date.now() + Math.max(1_000, Number.isFinite(seconds) ? seconds : Number.isFinite(date) ? date - Date.now() : 30_000);
+      throw new ServiceError('Rate limit reached. Progress is saved. Waiting before retrying automatically.', 429, reason, retryAt);
+    }
     if (response.status === 401 || body.error === 'invalid_grant') throw new ServiceError('Account authorization expired. Reconnect the account, then resume your transfer.', 401);
     throw new ServiceError(typeof error.message === 'string' ? error.message : `The music service returned HTTP ${response.status}.`, response.status, reason);
   }
