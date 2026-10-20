@@ -69,7 +69,7 @@ describe('authenticated workspace UI', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
     const spotify = await screen.findByRole('region', { name: 'Spotify library' });
-    await userEvent.setup().click(within(spotify).getByRole('button', { name: 'Allow playlist access' }));
+    await userEvent.setup().click(within(spotify).getByRole('button', { name: 'Connect' }));
     await waitFor(() => expect(clerkAuthorize).toHaveBeenCalledOnce());
     expect(clerkAuthorize).toHaveBeenCalledWith({ additionalScopes: ['playlist-read-private', 'playlist-read-collaborative', 'playlist-modify-private', 'playlist-modify-public'], redirectUrl: `${window.location.origin}/sso-callback` });
     expect(fetchMock.mock.calls.some(([input]) => requestPath(input) === '/api/accounts/spotify/connect')).toBe(true);
@@ -87,7 +87,7 @@ describe('authenticated workspace UI', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('Sign in to use your transfer workspace.');
     for (const name of ['Spotify library', 'YouTube library']) {
       const library = await screen.findByRole('region', { name });
-      expect(within(library).getByRole('button', { name: 'Allow playlist access' })).toBeTruthy();
+      expect(within(library).getByRole('button', { name: 'Connect' })).toBeTruthy();
     }
   });
 

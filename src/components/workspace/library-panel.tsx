@@ -43,7 +43,6 @@ export function LibraryPanel({ provider, status, jobs, hiddenIds, onToggleHidden
 }) {
   const { user } = useUser();
   const clerkProvider = provider === 'youtube' ? 'google' : 'spotify';
-  const linkedAccount = user?.externalAccounts.find(item => (item.provider === clerkProvider || item.provider === `oauth_${clerkProvider}`));
   const authorize = useReverification(async () => {
     if (!user) throw new Error('Sign in before connecting a music account.');
     const options = { additionalScopes: [...providerScopes[provider]], redirectUrl: `${window.location.origin}/sso-callback` };
@@ -147,7 +146,7 @@ export function LibraryPanel({ provider, status, jobs, hiddenIds, onToggleHidden
           </AlertDialog>
             : status.configured[provider]
               ? <Button variant="outline" size="sm" disabled={busy} onClick={() => void connect()}>
-                {busy ? <Spinner data-icon="inline-start" /> : null}{busy ? 'Connecting…' : linkedAccount ? 'Allow playlist access' : 'Connect'}
+                {busy ? <Spinner data-icon="inline-start" /> : null}{busy ? 'Connecting…' : 'Connect'}
               </Button>
               : <Button variant="outline" size="sm" disabled>Unavailable</Button>}
         </CardAction>
@@ -158,7 +157,7 @@ export function LibraryPanel({ provider, status, jobs, hiddenIds, onToggleHidden
           <EmptyHeader>
             <EmptyMedia variant="icon"><MusicIcon /></EmptyMedia>
             <EmptyTitle>{provider === 'spotify' ? 'Start with the songs you love' : 'Put a picture to your playlist'}</EmptyTitle>
-            <EmptyDescription>{provider === 'spotify' ? 'Your Spotify sign-in is managed by Clerk. Allow playlist access to load your library.' : 'Use your Google account through Clerk to browse YouTube playlists and create music video collections.'}</EmptyDescription>
+            <EmptyDescription>{provider === 'spotify' ? 'Connect your Spotify account through Clerk to load your playlists.' : 'Connect your Google account through Clerk to browse YouTube playlists and create music video collections.'}</EmptyDescription>
           </EmptyHeader>
         </Empty> : <>
           <div className="flex flex-wrap items-center gap-2">
