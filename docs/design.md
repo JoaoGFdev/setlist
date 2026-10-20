@@ -33,5 +33,6 @@ Every role has a dark-mode value. Use semantic utilities (`bg-muted`, `text-mute
 
 - Callouts use `Alert`, empty states use `Empty`, loading uses `Skeleton` or `Spinner`, status uses `Badge`, confirmations use `AlertDialog`, transient feedback uses `toast` from `sonner`.
 - Forms use `FieldGroup` and `Field`. Icons inside buttons take `data-icon="inline-start|inline-end"` and no size classes.
+- Icons: UI icons come from `lucide-react` only. Spotify and YouTube logos come from Simple Icons via `ProviderIcon` / `ProviderMark` (`src/components/provider-mark.tsx`); never use text glyphs or hand-drawn marks for providers.
 - Spacing uses `flex`/`grid` with `gap-*`, never `space-*`.
 - Errors explain the next action. A service that is unavailable never blocks the other one.
