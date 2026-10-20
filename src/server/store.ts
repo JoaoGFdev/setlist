@@ -46,7 +46,7 @@ export class Store {
   private readonly encryptionKey: Promise<CryptoKey>;
   private readonly activeLeases = new Map<string, string>();
 
-  constructor(db: D1Database, private readonly userId: string, encryptionKeyBase64: string) {
+  constructor(db: D1Database, readonly userId: string, encryptionKeyBase64: string) {
     if (!userId) throw new Error('A userId is required');
     const rawKey = fromBase64(encryptionKeyBase64);
     if (rawKey.byteLength !== 32) throw new Error('TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes');
@@ -116,7 +116,7 @@ export class Store {
 
   async deleteWorkspaceDocuments(name: string, token: string): Promise<void> {
     const result = await this.database.prepare(`
-      DELETE FROM app_documents WHERE user_id = ?
+      DELETE FROM app_documents WHERE user_id = ? AND key NOT GLOB 'connection-disabled:*'
         AND EXISTS (SELECT 1 FROM operation_leases
           WHERE user_id = ? AND name = ? AND token = ? AND expires_at > ${DATABASE_NOW_SQL})
     `).bind(this.userId, this.userId, name, token).run();

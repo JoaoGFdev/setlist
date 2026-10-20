@@ -28,7 +28,7 @@ function PrivacyPolicy() {
     <h2>When information is shared</h2>
     <p>Setlist does not sell your personal information. Information is shared only as needed to operate the service:</p>
     <ul>
-      <li><strong>Clerk</strong> provides authentication and processes sign-in information.</li>
+      <li><strong>Clerk</strong> provides authentication and processes sign-in information. When you grant playlist access through a linked account, Clerk also manages its OAuth authorization and supplies access tokens to Setlist’s server for the actions you request.</li>
       <li><strong>Spotify and Google/YouTube</strong> receive the OAuth requests and API calls needed to connect your account and perform the playlist actions you request. Their own terms and privacy policies apply to their services. See <a href="https://www.spotify.com/legal/privacy-policy/" target="_blank" rel="noreferrer">Spotify’s Privacy Policy</a> and <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Google’s Privacy Policy</a>.</li>
       <li><strong>Cloudflare</strong> hosts the application and database and may process technical information needed to deliver and secure the service.</li>
     </ul>
@@ -37,6 +37,7 @@ function PrivacyPolicy() {
     <h2>Retention and your choices</h2>
     <p>Music-account credentials remain stored until you disconnect that account or request deletion. Disconnecting either music account removes its saved credentials and immediately deletes your saved transfer history. You can also revoke Setlist’s access in your <a href="https://myaccount.google.com/permissions" target="_blank" rel="noreferrer">Google account permissions</a> or Spotify account settings; revoking access prevents further API access, and you can email us to request deletion of stored data.</p>
     <p>Transfer history and workspace records are automatically deleted no later than 30 days after a transfer is started. OAuth connection state expires after ten minutes. You may request deletion of your Setlist data, including connected-account credentials, by emailing <a href="mailto:me@joaogf.dev">me@joaogf.dev</a> from the email address associated with your account. We will verify the request and delete information we control, subject to any legal retention requirements.</p>
+    <p>Disconnecting a music library stops Setlist from using its Clerk-managed authorization. The social account may remain linked for sign-in; remove it through your Setlist account settings or revoke access at the provider to remove that authorization too.</p>
 
     <h2>Cookies</h2>
     <p>Setlist and Clerk use essential cookies for authentication, session security, and completing music-service OAuth requests. The temporary OAuth state cookie is HTTP-only and expires after ten minutes. Setlist does not use advertising cookies.</p>

@@ -2,14 +2,16 @@ import type { Candidate, Page, Playlist, Provider, Track } from '../../shared/ty
 import type { Credentials, Store } from './store';
 import type { AppEnv } from './env';
 import { rank, splitVideoTitle } from './matching';
+import { clerkProviderToken } from './clerk-accounts';
+import { providerScopes } from '../../shared/provider-scopes';
 
 type Json = Record<string, unknown>;
 const timeout = 8_000;
 const SPOTIFY = 'https://api.spotify.com/v1/';
 const YOUTUBE = 'https://www.googleapis.com/youtube/v3/';
 const configs = {
-  spotify: { auth: 'https://accounts.spotify.com/authorize', token: 'https://accounts.spotify.com/api/token', scope: 'playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public' },
-  youtube: { auth: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token', scope: 'https://www.googleapis.com/auth/youtube.force-ssl' },
+  spotify: { auth: 'https://accounts.spotify.com/authorize', token: 'https://accounts.spotify.com/api/token', scope: providerScopes.spotify.join(' ') },
+  youtube: { auth: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token', scope: providerScopes.youtube.join(' ') },
 } as const;
 
 export class ServiceError extends Error {
@@ -61,10 +63,36 @@ async function readResponse(response: Response): Promise<Json> {
 }
 
 export class Providers {
+  private readonly clerkAccounts = new Map<Provider, Promise<Credentials | undefined>>();
   constructor(readonly store: Store, readonly env: AppEnv) {}
+  private clerkCredentials(provider: Provider): Promise<Credentials | undefined> {
+    const existing = this.clerkAccounts.get(provider);
+    if (existing) return existing;
+    const pending = this.loadClerkCredentials(provider);
+    this.clerkAccounts.set(provider, pending);
+    return pending;
+  }
+  private async loadClerkCredentials(provider: Provider): Promise<Credentials | undefined> {
+    if (!this.env.CLERK_SECRET_KEY || await this.store.get(`connection-disabled:${provider}`)) return undefined;
+    let token: string | undefined;
+    try { token = await clerkProviderToken(this.store.userId, provider, this.env.CLERK_SECRET_KEY); }
+    catch { throw new ServiceError('Could not retrieve music-account authorization from Clerk. Please try again.', 502); }
+    if (!token) return undefined;
+    const url = provider === 'spotify' ? `${SPOTIFY}me` : `${YOUTUBE}channels?part=snippet&mine=true`;
+    const profile = await readResponse(await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(timeout) }));
+    const channel = record(Array.isArray(profile.items) ? profile.items[0] : undefined);
+    const id = provider === 'spotify' ? str(profile.id) : str(channel.id);
+    if (!id) throw new ServiceError('This Google account needs a YouTube channel. Create one on YouTube, then reconnect.');
+    const name = provider === 'spotify' ? str(profile.display_name, id) : str(record(channel.snippet).title, id);
+    return { access_token: token, expiresAt: Date.now() + 60_000, account: { id, name } };
+  }
   async token(provider: Provider): Promise<string> {
     const credentials = await this.store.credentials(provider);
-    if (!credentials) throw new ServiceError(`Connect ${provider === 'spotify' ? 'Spotify' : 'YouTube'} first.`, 401);
+    if (!credentials) {
+      const clerk = await this.clerkCredentials(provider);
+      if (clerk) return clerk.access_token;
+      throw new ServiceError(`Allow ${provider === 'spotify' ? 'Spotify' : 'YouTube'} playlist access first.`, 401);
+    }
     if (credentials.expiresAt > Date.now() + 60_000) return credentials.access_token;
     if (!credentials.refresh_token) throw new ServiceError('Reconnect this account to refresh authorization.', 401);
     const config = providerConfig(provider, this.env);
@@ -91,7 +119,7 @@ export class Providers {
     if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     return readResponse(await fetch(url, { ...init, headers, signal: AbortSignal.timeout(timeout) }));
   }
-  credentials(provider: Provider) { return this.store.credentials(provider); }
+  async credentials(provider: Provider) { return await this.store.credentials(provider) || await this.clerkCredentials(provider); }
   playlistFrom(provider: Provider, value: Json): Playlist {
     if (provider === 'spotify') {
       const images = Array.isArray(value.images) ? value.images : [];

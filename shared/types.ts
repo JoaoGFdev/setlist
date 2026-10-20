@@ -71,6 +71,7 @@ export type FullJob = Job;
 export interface Account { id: string; name: string }
 export interface Status {
   accounts: Record<Provider, Account | null>;
+  connectionErrors?: Record<Provider, string | null>;
   configured: Record<Provider, boolean>;
   callbacks: Record<Provider, string>;
 }

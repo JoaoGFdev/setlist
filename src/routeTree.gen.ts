@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
+import { Route as SsoCallbackRouteImport } from './routes/sso-callback'
 import { Route as TermsOfServiceRouteImport } from './routes/terms-of-service'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
 import { Route as AuthSplatRouteImport } from './routes/auth.$'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
   id: '/privacy-policy',
   path: '/privacy-policy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SsoCallbackRoute = SsoCallbackRouteImport.update({
+  id: '/sso-callback',
+  path: '/sso-callback',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TermsOfServiceRoute = TermsOfServiceRouteImport.update({
@@ -44,6 +50,7 @@ const AuthSplatRoute = AuthSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/sso-callback': typeof SsoCallbackRoute
   '/terms-of-service': typeof TermsOfServiceRoute
   '/api/$': typeof ApiSplatRoute
   '/auth/$': typeof AuthSplatRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/sso-callback': typeof SsoCallbackRoute
   '/terms-of-service': typeof TermsOfServiceRoute
   '/api/$': typeof ApiSplatRoute
   '/auth/$': typeof AuthSplatRoute
@@ -59,6 +67,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/sso-callback': typeof SsoCallbackRoute
   '/terms-of-service': typeof TermsOfServiceRoute
   '/api/$': typeof ApiSplatRoute
   '/auth/$': typeof AuthSplatRoute
@@ -66,13 +75,25 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/privacy-policy' | '/terms-of-service' | '/api/$' | '/auth/$'
+    | '/'
+    | '/privacy-policy'
+    | '/sso-callback'
+    | '/terms-of-service'
+    | '/api/$'
+    | '/auth/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/privacy-policy' | '/terms-of-service' | '/api/$' | '/auth/$'
+  to:
+    | '/'
+    | '/privacy-policy'
+    | '/sso-callback'
+    | '/terms-of-service'
+    | '/api/$'
+    | '/auth/$'
   id:
     | '__root__'
     | '/'
     | '/privacy-policy'
+    | '/sso-callback'
     | '/terms-of-service'
     | '/api/$'
     | '/auth/$'
@@ -81,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PrivacyPolicyRoute: typeof PrivacyPolicyRoute
+  SsoCallbackRoute: typeof SsoCallbackRoute
   TermsOfServiceRoute: typeof TermsOfServiceRoute
   ApiSplatRoute: typeof ApiSplatRoute
   AuthSplatRoute: typeof AuthSplatRoute
@@ -100,6 +122,13 @@ declare module '@tanstack/react-router' {
       path: '/privacy-policy'
       fullPath: '/privacy-policy'
       preLoaderRoute: typeof PrivacyPolicyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sso-callback': {
+      id: '/sso-callback'
+      path: '/sso-callback'
+      fullPath: '/sso-callback'
+      preLoaderRoute: typeof SsoCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terms-of-service': {
@@ -129,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PrivacyPolicyRoute: PrivacyPolicyRoute,
+  SsoCallbackRoute: SsoCallbackRoute,
   TermsOfServiceRoute: TermsOfServiceRoute,
   ApiSplatRoute: ApiSplatRoute,
   AuthSplatRoute: AuthSplatRoute,

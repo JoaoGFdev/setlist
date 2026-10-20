@@ -1,8 +1,9 @@
-import { SignInButton, UserButton, useAuth } from '@clerk/tanstack-react-start';
+import { SignInButton, UserButton, useAuth, useUser, useReverification } from '@clerk/tanstack-react-start';
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import iconUrl from '../../assets/icon.svg?url';
 import type { FullJob, JobSummary, Page, Playlist, Provider, Status } from '../../shared/types';
+import { providerScopes } from '../../shared/provider-scopes';
 
 const names: Record<Provider, string> = { spotify: 'Spotify', youtube: 'YouTube' };
 const providers: Provider[] = ['spotify', 'youtube'];
@@ -43,7 +44,6 @@ export const Route = createFileRoute('/')({ component: App });
 
 export function App() {
   const [error, setError] = useState<string | null>(null);
-  const [setup, setSetup] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -55,16 +55,15 @@ export function App() {
   return <>
     <header className="topbar"><a href="/" className="wordmark"><img className="brand-logo" src={iconUrl} alt="" /> Setlist</a>
       <span className="local-badge"><span /> Private, request-driven transfers</span>
-      <div className="topbar-actions"><button className="text-button" onClick={() => setSetup(value => !value)} aria-expanded={setup}>Account setup</button>
-        {publishableConfigured ? <AuthControls /> : <span className="small">Sign-in setup required</span>}
+      <div className="topbar-actions">
+        {publishableConfigured ? <AuthControls /> : <span className="small">Sign-in unavailable</span>}
       </div>
     </header>
     <main>
       <section className="intro"><div><h1>Your playlists.<br />On both sides.</h1><p>Bring the soundtrack with you. Move playlists between Spotify and YouTube, with a say in every match.</p></div><div className="bridge-art" aria-hidden="true"><Mark provider="spotify" /><span className="bridge-line">↔</span><Mark provider="youtube" /></div></section>
       {error ? <div role="alert" className="notice error"><span>{error}</span><button className="text-button" onClick={() => setError(null)}>Dismiss</button></div> : null}
-      {setup ? <Setup status={null} /> : null}
-      {!publishableConfigured ? <div className="notice"><div><strong>Set up secure sign-in to use your workspace.</strong><p>Configure Clerk keys in your Worker and publishable key in the Vite environment. Provider credentials remain separate.</p></div><button className="secondary" onClick={() => setSetup(true)}>View setup steps</button></div> : null}
-      {publishableConfigured ? <AuthSession onError={setError} onSetup={() => setSetup(true)} /> : null}
+      {!publishableConfigured ? <p role="status" className="notice">Sign-in is temporarily unavailable. Please try again later.</p> : null}
+      {publishableConfigured ? <AuthSession onError={setError} /> : null}
       <footer><span>Personal use. No transfer subscription. No app-imposed song cap.</span><span className="footer-links"><span>Platform quotas apply; active work advances one request at a time.</span><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></span></footer>
     </main>
   </>;
@@ -73,17 +72,17 @@ export function App() {
 function AuthControls() {
   const { isLoaded, userId } = useAuth();
   if (!isLoaded) return <span className="small">Loading sign-in…</span>;
-  return userId ? <UserButton /> : <SignInButton mode="modal"><button className="connect">Sign in</button></SignInButton>;
+  return userId ? <UserButton userProfileProps={{ additionalOAuthScopes: { google: [...providerScopes.youtube], spotify: [...providerScopes.spotify] } }} /> : <SignInButton mode="modal"><button className="connect">Sign in</button></SignInButton>;
 }
 
-function AuthSession({ onError, onSetup }: { onError: (message: string | null) => void; onSetup: () => void }) {
+function AuthSession({ onError }: { onError: (message: string | null) => void }) {
   const { isLoaded, userId } = useAuth();
   if (!isLoaded) return <p role="status" className="loading">Checking sign-in…</p>;
   if (!userId) return <div className="empty-workspace sign-in-prompt"><span aria-hidden="true">↔</span><h3>Sign in to your private workspace</h3><p>Your connected music accounts and transfer reviews belong to your Clerk account.</p><SignInButton mode="modal"><button className="primary">Sign in to continue</button></SignInButton></div>;
-  return <Workspace userId={userId} onError={onError} onSetup={onSetup} />;
+  return <Workspace userId={userId} onError={onError} />;
 }
 
-function Workspace({ userId, onError, onSetup }: { userId: string; onError: (message: string | null) => void; onSetup: () => void }) {
+function Workspace({ userId, onError }: { userId: string; onError: (message: string | null) => void }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -150,23 +149,23 @@ function Workspace({ userId, onError, onSetup }: { userId: string; onError: (mes
 
   if (!status) return <p role="status" className="loading">Loading your workspace…</p>;
   return <>
-    {!status.configured.spotify || !status.configured.youtube ? <div className="notice"><div><strong>Connect your own music accounts.</strong><p>Spotify and Google OAuth are separate from signing in to Setlist.</p></div><button className="secondary" onClick={onSetup}>View setup steps</button></div> : null}
-    <div className="libraries">{providers.map(provider => <Library key={provider} provider={provider} status={status} onError={onError} onSetup={onSetup} onCreated={job => { updateJob(job); void runJob(job); }} onDisconnect={() => setRefresh(value => value + 1)} />)}</div>
+    <div className="libraries">{providers.map(provider => <Library key={provider} provider={provider} status={status} onError={onError} onCreated={job => { updateJob(job); void runJob(job); }} onDisconnect={() => setRefresh(value => value + 1)} />)}</div>
     <section className="transfer-section" aria-labelledby="transfer-heading"><div className="section-heading"><div><h2 id="transfer-heading">Transfer workspace</h2><p>Match first. Review the results. Create a private playlist.</p></div>{jobs.length ? <label className="history-label">Transfer<select value={activeId || ''} onChange={event => void openJob(event.target.value)}>{jobs.map(job => <option key={job.id} value={job.id}>{job.name} · {job.phase}</option>)}</select></label> : null}</div>
       {activeJob ? <Transfer key={activeJob.id} job={activeJob} armed={armed} onStart={runJob} onUpdate={updateJob} onError={onError} /> : <div className="empty-workspace"><span aria-hidden="true">↔</span><h3>A new home for your favorites</h3><p>Connect both accounts, then choose a playlist above.<br />You’ll review the songs here before anything is created.</p></div>}
     </section>
   </>;
 }
 
-function Setup({ status }: { status: Status | null }) {
-  const base = import.meta.env.VITE_APP_URL || 'https://your-domain.example';
-  return <section className="setup-panel" aria-labelledby="setup-heading"><h2 id="setup-heading">Configure sign-in and provider access</h2>
-    <p>Set Worker secrets for Clerk, Spotify, Google, and token encryption. Set <code>VITE_CLERK_PUBLISHABLE_KEY</code> when building the app. Local development reads values from <code>.env.local</code>.</p>
-    <div className="setup-columns"><div><h3>Clerk</h3><p>Set <code>CLERK_SECRET_KEY</code> and the public key. Clerk production sign-in needs a domain you control.</p></div><div><h3>Spotify</h3><p>Register this callback in your Spotify app:</p><code className="callback">{status?.callbacks.spotify || `${base}/auth/spotify/callback`}</code><p>Set <code>SPOTIFY_CLIENT_ID</code>.</p></div><div><h3>YouTube</h3><p>Enable YouTube Data API v3 and register this callback:</p><code className="callback">{status?.callbacks.youtube || `${base}/auth/youtube/callback`}</code><p>Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>.</p></div><div><h3>Worker settings</h3><p>Configure <code>APP_URL</code>, <code>TOKEN_ENCRYPTION_KEY</code>, and the D1 binding. Never put secrets in browser storage.</p></div></div>
-  </section>;
-}
-
-function Library({ provider, status, onError, onSetup, onCreated, onDisconnect }: { provider: Provider; status: Status; onError: (message: string) => void; onSetup: () => void; onCreated: (job: FullJob) => void; onDisconnect: () => void }) {
+function Library({ provider, status, onError, onCreated, onDisconnect }: { provider: Provider; status: Status; onError: (message: string) => void; onCreated: (job: FullJob) => void; onDisconnect: () => void }) {
+  const { user } = useUser();
+  const clerkProvider = provider === 'youtube' ? 'google' : 'spotify';
+  const linkedAccount = user?.externalAccounts.find(item => (item.provider === clerkProvider || item.provider === `oauth_${clerkProvider}`));
+  const authorize = useReverification(async () => {
+    if (!user) throw new Error('Sign in before connecting a music account.');
+    const options = { additionalScopes: [...providerScopes[provider]], redirectUrl: `${window.location.origin}/sso-callback` };
+    const existing = user.externalAccounts.find(item => (item.provider === clerkProvider || item.provider === `oauth_${clerkProvider}`));
+    return existing ? existing.reauthorize(options) : user.createExternalAccount({ ...options, strategy: provider === 'youtube' ? 'oauth_google' : 'oauth_spotify' });
+  });
   const account = status.accounts[provider];
   const destination: Provider = provider === 'spotify' ? 'youtube' : 'spotify';
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -202,6 +201,17 @@ function Library({ provider, status, onError, onSetup, onCreated, onDisconnect }
     catch (cause) { onError((cause as Error).message); }
     finally { setBusy(false); }
   }
+  async function connect() {
+    setBusy(true);
+    try {
+      await api(`/accounts/${provider}/connect`, {});
+      const external = await authorize();
+      const redirect = external?.verification?.externalVerificationRedirectURL;
+      if (redirect) { window.location.assign(redirect.href); return; }
+      if (external) { await user?.reload(); onDisconnect(); }
+    } catch (cause) { onError((cause as Error).message); }
+    finally { setBusy(false); }
+  }
   async function create(event: React.FormEvent) {
     event.preventDefault(); if (!chosen) return;
     setBusy(true);
@@ -210,8 +220,9 @@ function Library({ provider, status, onError, onSetup, onCreated, onDisconnect }
     finally { setBusy(false); }
   }
   const filtered = playlists.filter(playlist => playlist.name.toLowerCase().includes(filter.toLowerCase()));
-  return <section className={`library ${provider}`} aria-label={`${names[provider]} library`}><div className="library-header"><div className="service-name"><Mark provider={provider} /><div><h2>{names[provider]}</h2><p>{account ? account.name : 'Connect your music library'}</p></div></div>{account ? <button disabled={busy} className="text-button" onClick={disconnect}>Disconnect</button> : status.configured[provider] ? <a className="connect" href={`/auth/${provider}`}>Connect</a> : <button className="connect" onClick={onSetup}>Set up</button>}</div>
-    {!account ? <div className="library-empty"><span className="record" aria-hidden="true">♪</span><h3>{provider === 'spotify' ? 'Start with the songs you love' : 'Put a picture to your playlist'}</h3><p>{provider === 'spotify' ? 'Your saved playlists will appear once you connect Spotify.' : 'Connect YouTube to browse playlists and create music video collections.'}</p></div> : <>
+  return <section className={`library ${provider}`} aria-label={`${names[provider]} library`}><div className="library-header"><div className="service-name"><Mark provider={provider} /><div><h2>{names[provider]}</h2><p>{account ? account.name : 'Connect your music library'}</p></div></div>{account ? <button disabled={busy} className="text-button" onClick={disconnect}>Disconnect</button> : status.configured[provider] ? <button className="connect" disabled={busy} onClick={() => void connect()}>{busy ? 'Connecting…' : linkedAccount ? 'Allow playlist access' : 'Connect'}</button> : <button className="connect" disabled>Unavailable</button>}</div>
+    {status.connectionErrors?.[provider] ? <p role="alert" className="inline-error">{status.connectionErrors[provider]}</p> : null}
+    {!account ? <div className="library-empty"><span className="record" aria-hidden="true">♪</span><h3>{provider === 'spotify' ? 'Start with the songs you love' : 'Put a picture to your playlist'}</h3><p>{provider === 'spotify' ? 'Your Spotify sign-in is managed by Clerk. Allow playlist access to load your library.' : 'Use your Google account through Clerk to browse YouTube playlists and create music video collections.'}</p></div> : <>
       <div className="library-tools"><label><span className="sr-only">Search {names[provider]} playlists</span><input type="search" placeholder="Find a playlist" value={filter} onChange={event => setFilter(event.target.value)} /></label><button className="text-button" disabled={loading} onClick={() => setReload(value => value + 1)}>{loading ? 'Loading…' : 'Refresh'}</button></div>
       {loadError ? <div role="alert" className="inline-error">{loadError} <button className="text-button" onClick={() => setReload(value => value + 1)}>Retry</button></div> : null}
       {!loading && !loadError && !filtered.length ? <p className="no-results">{playlists.length ? 'No playlists match your search.' : 'No playlists found in this account.'}</p> : null}
