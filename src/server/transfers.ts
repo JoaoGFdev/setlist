@@ -119,7 +119,7 @@ export class Transfers {
       await this.assertAccounts(job);
       try {
         if (job.phase === 'loading') return await this.loadPage(job, token);
-        if (job.phase === 'matching') return await this.matchOne(job, token);
+        if (job.phase === 'matching') return await this.matchBatch(job, token);
         if (job.phase === 'transferring') return await this.transferStep(job, token);
         throw new ServiceError('This transfer is waiting for review.', 409);
       } catch (error) {
@@ -161,28 +161,42 @@ export class Transfers {
     await this.save(job, token);
     return job;
   }
-  private async matchOne(job: JobSummary, token: string): Promise<JobSummary> {
-    const index = job.matchPosition;
-    const key = itemKey(job.id, index);
-    const current = await this.store.get<JobItem>(key);
-    if (!current) throw new ServiceError('A saved source track is missing. Resume after storage is available.', 500);
-    if (current.searched) {
-      job.matchPosition += 1;
-      if (job.matchPosition >= job.totalCount) { job.phase = 'review'; job.state = 'idle'; job.message = undefined; }
-      await this.save(job, token);
-      return job;
-    }
-    const candidates = await this.providers.search(job.destination, current.source);
+  private async matchBatch(job: JobSummary, token: string): Promise<JobSummary> {
+    // Bound provider requests per invocation; keep writes serialized under the lease.
+    const start = job.matchPosition;
+    const positions = Array.from({ length: Math.min(3, job.totalCount - start) }, (_, offset) => start + offset);
+    const items = await Promise.all(positions.map((position) => this.store.get<JobItem>(itemKey(job.id, position))));
+    if (items.some((item) => !item)) throw new ServiceError('A saved source track is missing. Resume after storage is available.', 500);
+    const results = await Promise.allSettled(items.map(async (item) => {
+      if (item!.searched) return item!;
+      const candidates = await this.providers.search(job.destination, item!.source);
+      return { ...item!, candidates, selected: candidates[0] || null, searched: true };
+    }));
     await this.assertLease(token);
     const expiresAt = Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS;
-    const item = { ...current, candidates, selected: candidates[0] || null, searched: true, expiresAt };
-    job.matchedCount += 1;
-    if (item.selected) job.selectedCount += 1;
-    job.matchPosition += 1;
+    const entries: Array<{ key: string; value: unknown }> = [];
+    let failure: PromiseRejectedResult | undefined;
+    for (const [offset, result] of results.entries()) {
+      if (result.status === 'rejected') {
+        failure ??= result;
+        continue;
+      }
+      if (!items[offset]!.searched) {
+        job.matchedCount += 1;
+        if (result.value.selected) job.selectedCount += 1;
+        entries.push({ key: itemKey(job.id, positions[offset]), value: { ...result.value, expiresAt } });
+      }
+    }
+    // A failed position is retried on resume; later successes are retained and skipped.
+    for (const result of results) {
+      if (result.status === 'rejected') break;
+      job.matchPosition += 1;
+    }
     if (job.matchPosition >= job.totalCount) { job.phase = 'review'; job.state = 'idle'; }
-    await this.assertLease(token);
     job.updatedAt = timestamp();
-    await this.store.setMany([{ key, value: item }, { key: `job:${job.id}`, value: { ...job, expiresAt } }]);
+    entries.push({ key: `job:${job.id}`, value: { ...job, expiresAt } });
+    await this.store.setMany(entries);
+    if (failure) throw failure.reason;
     return job;
   }
   async select(id: string, index: number, candidateId: string | null): Promise<FullJob> {

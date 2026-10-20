@@ -241,7 +241,9 @@ export class Providers {
   }
   async search(destination: Provider, source: Track, customQuery?: string): Promise<Candidate[]> {
     const query = customQuery || `${source.artist} ${source.title}${destination === 'youtube' ? ' official music video' : ''}`;
-    const cacheKey = `search:${destination}:${query.toLowerCase()}`;
+    const cacheKey = destination === 'youtube'
+      ? `search:${destination}:mv-v2:${query.toLowerCase()}`
+      : `search:${destination}:${query.toLowerCase()}`;
     const cached = await this.store.get<{ at: number; expiresAt: number; tracks: Track[] }>(cacheKey);
     let tracks: Track[];
     if (cached && Date.now() - cached.at < 7 * 86_400_000) tracks = cached.tracks;
@@ -251,7 +253,7 @@ export class Providers {
       const at = Date.now();
       await this.store.set(cacheKey, { at, expiresAt: at + 7 * 86_400_000, tracks });
     } else {
-      const data = await this.api(destination, `search?part=snippet&type=video&videoCategoryId=10&maxResults=5&q=${encodeURIComponent(query)}`);
+      const data = await this.api(destination, `search?part=snippet&type=video&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(query)}`);
       tracks = (Array.isArray(data.items) ? data.items : []).map((entry) => {
         const item = record(entry); const id = str(record(item.id).videoId); const snippet = record(item.snippet);
         return { id, title: str(snippet.title), artist: str(snippet.channelTitle), url: `https://www.youtube.com/watch?v=${id}` };

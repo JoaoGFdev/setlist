@@ -58,7 +58,7 @@ async function putItems(store: MemoryStore, id: string, items: JobItem[]) {
   await store.setMany(items.map((item, index) => ({ key: `item:${id}:${String(index).padStart(8, '0')}`, value: item })));
 }
 
-test('a source load step fetches one page and matching advances one item per step', async () => {
+test('a source load step fetches one page and matching searches a bounded batch', async () => {
   const { store, providers, transfers } = setup();
   let sourceCalls = 0;
   let searches = 0;
@@ -87,11 +87,7 @@ test('a source load step fetches one page and matching advances one item per ste
   assert.equal(summary.totalCount, 3);
   assert.equal(summary.phase, 'matching');
   summary = await domain.step(created.id);
-  assert.equal(searches, 1);
-  assert.equal(summary.matchedCount, 1);
-  assert.equal(summary.phase, 'matching');
-  await domain.step(created.id);
-  summary = await domain.step(created.id);
+  assert.equal(summary.matchedCount, 3);
   assert.equal(searches, 3);
   assert.equal(summary.phase, 'review');
   assert.equal(summary.selectedCount, 3);
@@ -175,10 +171,8 @@ test('unavailable source positions advance one step without blocking later match
     { source: { ...track('unavailable'), unavailable: true }, candidates: [], selected: null, searched: true },
     { source: track('available'), candidates: [], selected: null, searched: false },
   ]);
-  await transfers.step(job.id);
-  assert.equal(searches, 0);
-  assert.equal((await transfers.summary(job.id)).matchPosition, 1);
   const last = await transfers.step(job.id);
+  assert.equal(last.matchPosition, 2);
   assert.equal(searches, 1);
   assert.equal(last.phase, 'review');
   assert.equal(last.matchedCount, 2);
@@ -358,4 +352,40 @@ test('clear removes every job document but keeps preferences, credentials and di
   assert.deepEqual([...store.data.keys()].sort(), ['connection-disabled:youtube', 'preferences']);
   assert.ok(await store.credentials('spotify'));
   assert.deepEqual(await transfers.list(), []);
+});
+
+test('matching runs three searches concurrently and retains successes around a failed position', async () => {
+  const { store } = setup();
+  const calls: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let fail = true;
+  class Fake extends Providers {
+    override async search(_provider: Provider, source: Track) {
+      calls.push(source.id);
+      if (calls.length === 3) release();
+      await gate;
+      if (source.id === 'b' && fail) throw new Error('temporary search failure');
+      return [candidate(source.id)];
+    }
+  }
+  const transfers = new Transfers(store, new Fake(store, env));
+  const job = makeJob({ phase: 'matching', destinationId: undefined, totalCount: 4 });
+  await store.set(`job:${job.id}`, job);
+  await putItems(store, job.id, ['a', 'b', 'c', 'd'].map((id) => ({ source: track(id), candidates: [], selected: null, searched: false })));
+  await assert.rejects(transfers.step(job.id), /temporary search failure/);
+  assert.deepEqual(calls, ['a', 'b', 'c']);
+  const paused = await transfers.get(job.id);
+  assert.equal(paused.state, 'paused');
+  assert.equal(paused.matchPosition, 1);
+  assert.equal(paused.matchedCount, 2);
+  assert.deepEqual(paused.items.map((item) => item.searched), [true, false, true, false]);
+  fail = false;
+  await transfers.resume(job.id);
+  const complete = await transfers.step(job.id);
+  assert.deepEqual(calls, ['a', 'b', 'c', 'b', 'd']);
+  assert.equal(complete.phase, 'review');
+  assert.equal(complete.matchedCount, 4);
+  assert.equal(complete.selectedCount, 4);
+  assert.deepEqual((await transfers.get(job.id)).items.map((item) => item.selected?.id), ['a', 'b', 'c', 'd']);
 });
