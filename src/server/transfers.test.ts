@@ -22,6 +22,7 @@ class MemoryStore extends Store {
     for (const entry of entries) this.data.set(entry.key, structuredClone(entry.value));
   }
   override async delete(key: string) { this.data.delete(key); }
+  override async deletePrefix(prefix: string) { for (const key of [...this.data.keys()]) if (key.startsWith(prefix)) this.data.delete(key); }
   override async list<T>(prefix: string) {
     return [...this.data.entries()].filter(([key]) => key.startsWith(prefix)).sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => structuredClone(value) as T);
   }
@@ -303,4 +304,58 @@ test('YouTube destination retries are bounded and do not retry unrelated errors'
       assert.equal(calls, expectedCalls);
     }
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('create records the source playlist details on the job and its summary', async () => {
+  const { store } = setup();
+  class Fake extends Providers {
+    override async playlist() { return { id: 'source', name: 'Road Trip', description: '', count: 3, image: 'https://img.example/cover.jpg', url: 'https://open.spotify.com/playlist/source', transferable: true }; }
+  }
+  const transfers = new Transfers(store, new Fake(store, env));
+  const created = await transfers.create('spotify', 'source', 'My copy');
+  assert.equal(created.name, 'My copy');
+  const expected = { sourcePlaylistName: 'Road Trip', sourcePlaylistUrl: 'https://open.spotify.com/playlist/source', sourcePlaylistImage: 'https://img.example/cover.jpg' };
+  assert.deepEqual({ sourcePlaylistName: created.sourcePlaylistName, sourcePlaylistUrl: created.sourcePlaylistUrl, sourcePlaylistImage: created.sourcePlaylistImage }, expected);
+  const [summary] = await transfers.list();
+  assert.equal(summary.sourcePlaylistName, 'Road Trip');
+  assert.equal(summary.sourcePlaylistImage, 'https://img.example/cover.jpg');
+});
+
+test('delete removes the job, its items and its approved list but leaves other jobs and 404s unknown ids', async () => {
+  const { store, transfers } = setup();
+  for (const id of ['job-a', 'job-b']) {
+    await store.set(`job:${id}`, makeJob({ id }));
+    await putItems(store, id, [{ source: track('a'), candidates: [], selected: null, searched: true }, { source: track('b'), candidates: [], selected: null, searched: true }]);
+    await store.set(`expected:${id}`, { ids: ['a', 'b'] });
+  }
+  await transfers.delete('job-a');
+  assert.deepEqual([...store.data.keys()].filter((key) => key.includes('job-a')), []);
+  assert.equal(store.data.has('job:job-b'), true);
+  assert.equal(store.data.has('expected:job-b'), true);
+  assert.equal((await store.list('item:job-b:')).length, 2);
+  await assert.rejects(transfers.delete('job-a'), (error: unknown) => error instanceof ServiceError && error.status === 404);
+  assert.equal(store.lease, undefined);
+});
+
+test('delete is refused while another operation holds the workspace lease', async () => {
+  const { store, transfers } = setup();
+  await store.set('job:job-test', makeJob());
+  store.lease = 'other-operation';
+  await assert.rejects(transfers.delete('job-test'), (error: unknown) => error instanceof ServiceError && error.status === 409 && /Another operation is active/.test(error.message));
+  await assert.rejects(transfers.clear(), (error: unknown) => error instanceof ServiceError && error.status === 409);
+  assert.equal(store.data.has('job:job-test'), true);
+});
+
+test('clear removes every job document but keeps preferences, credentials and disabled-connection markers', async () => {
+  const { store, transfers } = setup();
+  await store.set('job:job-a', makeJob({ id: 'job-a' }));
+  await store.set('job:job-b', makeJob({ id: 'job-b' }));
+  await putItems(store, 'job-a', [{ source: track('a'), candidates: [], selected: null, searched: true }]);
+  await store.set('expected:job-a', { ids: ['a'] });
+  await store.set('preferences', { hiddenPlaylists: [] });
+  await store.set('connection-disabled:youtube', { disabled: true });
+  await transfers.clear();
+  assert.deepEqual([...store.data.keys()].sort(), ['connection-disabled:youtube', 'preferences']);
+  assert.ok(await store.credentials('spotify'));
+  assert.deepEqual(await transfers.list(), []);
 });

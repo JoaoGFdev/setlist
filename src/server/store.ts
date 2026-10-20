@@ -116,11 +116,27 @@ export class Store {
 
   async deleteWorkspaceDocuments(name: string, token: string): Promise<void> {
     const result = await this.database.prepare(`
-      DELETE FROM app_documents WHERE user_id = ? AND key NOT GLOB 'connection-disabled:*'
+      DELETE FROM app_documents WHERE user_id = ? AND key NOT GLOB 'connection-disabled:*' AND key != 'preferences'
         AND EXISTS (SELECT 1 FROM operation_leases
           WHERE user_id = ? AND name = ? AND token = ? AND expires_at > ${DATABASE_NOW_SQL})
     `).bind(this.userId, this.userId, name, token).run();
     if (result.meta.changes === 0) await this.assertLease(name, token);
+  }
+
+  async deletePrefix(prefix: string): Promise<void> {
+    const constraints = `user_id = ? AND key >= ? AND key < ? AND substr(key, 1, length(?)) = ? AND key LIKE ? ESCAPE '!'`;
+    const params = [this.userId, prefix, `${prefix}\uffff`, prefix, prefix, escapeLikePrefix(prefix)];
+    const lease = this.currentLease();
+    if (lease) {
+      const result = await this.database.prepare(`
+        DELETE FROM app_documents WHERE ${constraints}
+          AND EXISTS (SELECT 1 FROM operation_leases
+            WHERE user_id = ? AND name = ? AND token = ? AND expires_at > ${DATABASE_NOW_SQL})
+      `).bind(...params, this.userId, lease.name, lease.token).run();
+      if (result.meta.changes === 0) await this.assertLease(lease.name, lease.token);
+      return;
+    }
+    await this.database.prepare(`DELETE FROM app_documents WHERE ${constraints}`).bind(...params).run();
   }
 
   async list<T>(prefix: string): Promise<T[]> {

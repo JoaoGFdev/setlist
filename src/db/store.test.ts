@@ -51,6 +51,29 @@ describe('D1 Store persistence', () => {
     expect(expired).toHaveLength(0);
   });
 
+  it('deletes a prefix without touching other users or lookalike keys, and fences it under a lease', async () => {
+    const alice = store('prefix-alice');
+    const bob = store('prefix-bob');
+    await alice.setMany([{ key: 'item:j_1:0', value: 1 }, { key: 'item:j_1:1', value: 2 }, { key: 'item:jX1:0', value: 3 }, { key: 'preferences', value: 4 }]);
+    await bob.set('item:j_1:0', 5);
+    await alice.deletePrefix('item:j_1:');
+    expect(await alice.list('item:')).toEqual([3]);
+    expect(await alice.get('preferences')).toBe(4);
+    expect(await bob.get('item:j_1:0')).toBe(5);
+
+    const stale = store('prefix-alice');
+    const oldToken = await stale.acquireLease('workspace', 150);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const current = store('prefix-alice');
+    const newToken = await current.acquireLease('workspace', 5_000);
+    await expect(stale.deletePrefix('item:')).rejects.toMatchObject({ status: 409 });
+    expect(await alice.list('item:')).toEqual([3]);
+    await current.deletePrefix('item:');
+    expect(await alice.list('item:')).toEqual([]);
+    await stale.releaseLease('workspace', oldToken!);
+    await current.releaseLease('workspace', newToken!);
+  });
+
   it('encrypts credentials, scopes them by user, and rejects tampered ciphertext', async () => {
     const alice = store('credential-alice');
     const bob = store('credential-bob');
