@@ -1,10 +1,7 @@
-/* Legacy page styles sit below Tailwind utilities until every page is on shadcn components. */
-@layer theme, base, legacy, components, utilities;
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
-@import "./legacy.css" layer(legacy);
 
 @custom-variant dark (&:is(.dark *));
 
