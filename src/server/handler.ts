@@ -3,6 +3,7 @@ import type { AppEnv } from './env';
 import { Store } from './store';
 import { callbackUrl, providerConfig, providerConfigured, Providers, ServiceError, readResponse, validOAuthBinding } from './providers';
 import { Transfers } from './transfers';
+import { getPreferences, setPlaylistHidden } from './preferences';
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
 const providers = new Set<Provider>(['spotify', 'youtube']);
@@ -96,12 +97,18 @@ export async function dispatchApi(request: Request, env: AppEnv, userId: string)
       const name = requiredString(input.name, 'Playlist name', 150, true);
       return json(await transfers.create(sourceValue, playlistId, name), 201);
     }
-    const jobAction = path.match(/^\/api\/jobs\/([^/]+)\/(step|select|search|approve|resume)$/);
+    if (request.method === 'POST' && path === '/api/jobs/clear') {
+      await body(request);
+      await transfers.clear();
+      return json({ ok: true });
+    }
+    const jobAction = path.match(/^\/api\/jobs\/([^/]+)\/(step|select|search|approve|resume|delete)$/);
     if (request.method === 'POST' && jobAction) {
       const id = decodeURIComponent(jobAction[1]); const action = jobAction[2];
       if (action === 'step') return json(await transfers.step(id));
       if (action === 'approve') return json(await transfers.approve(id));
       if (action === 'resume') return json(await transfers.resume(id));
+      if (action === 'delete') { await body(request); await transfers.delete(id); return json({ ok: true }); }
       const input = await body(request);
       const index = nonnegativeInteger(input.index, 'Track index');
       if (action === 'select') {
@@ -111,6 +118,24 @@ export async function dispatchApi(request: Request, env: AppEnv, userId: string)
       }
       const query = requiredString(input.query, 'Search query', 200, true);
       return json(await transfers.search(id, index, query));
+    }
+    if (request.method === 'GET' && path === '/api/preferences') return json(await getPreferences(store));
+    const hiddenMatch = path.match(/^\/api\/playlists\/([^/]+)\/hidden$/);
+    if (request.method === 'POST' && hiddenMatch) {
+      const provider = decodeURIComponent(hiddenMatch[1]);
+      if (!isProvider(provider)) throw new ServiceError('Unknown music service.');
+      const input = await body(request);
+      const playlistId = requiredString(input.playlistId, 'Playlist ID', 200);
+      const name = requiredString(input.name, 'Playlist name', 300, true);
+      if (typeof input.hidden !== 'boolean') throw new ServiceError('Choose whether to hide or unhide the playlist.');
+      let image: string | undefined;
+      if (input.image !== undefined && input.image !== null) {
+        image = requiredString(input.image, 'Image URL', 2000);
+        let parsed: URL | undefined;
+        try { parsed = new URL(image); } catch { /* rejected below */ }
+        if (parsed?.protocol !== 'https:') throw new ServiceError('Image URL must be an https URL.');
+      }
+      return json(await setPlaylistHidden(store, provider, { playlistId, name, image, hidden: input.hidden }));
     }
     const connect = path.match(/^\/api\/accounts\/([^/]+)\/connect$/);
     if (request.method === 'POST' && connect) {
