@@ -1,7 +1,6 @@
-import { SignInButton, UserButton, useAuth, useUser, useReverification } from '@clerk/tanstack-react-start';
+import { SignInButton, useAuth, useUser, useReverification } from '@clerk/tanstack-react-start';
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
-import iconUrl from '../../assets/icon.svg?url';
 import type { FullJob, JobSummary, Page, Playlist, Provider, Status } from '../../shared/types';
 import { providerScopes } from '../../shared/provider-scopes';
 
@@ -53,26 +52,13 @@ export function App() {
 
   const publishableConfigured = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
   return <>
-    <header className="topbar"><a href="/" className="wordmark"><img className="brand-logo" src={iconUrl} alt="" /> Setlist</a>
-      <span className="local-badge"><span /> Private, request-driven transfers</span>
-      <div className="topbar-actions">
-        {publishableConfigured ? <AuthControls /> : <span className="small">Sign-in unavailable</span>}
-      </div>
-    </header>
-    <main>
+    <div className="legacy-workspace">
       <section className="intro"><div><h1>Your playlists.<br />On both sides.</h1><p>Bring the soundtrack with you. Move playlists between Spotify and YouTube, with a say in every match.</p></div><div className="bridge-art" aria-hidden="true"><Mark provider="spotify" /><span className="bridge-line">↔</span><Mark provider="youtube" /></div></section>
       {error ? <div role="alert" className="notice error"><span>{error}</span><button className="text-button" onClick={() => setError(null)}>Dismiss</button></div> : null}
       {!publishableConfigured ? <p role="status" className="notice">Sign-in is temporarily unavailable. Please try again later.</p> : null}
       {publishableConfigured ? <AuthSession onError={setError} /> : null}
-      <footer><span>Personal use. No transfer subscription. No app-imposed song cap.</span><span className="footer-links"><span>Platform quotas apply; active work advances one request at a time.</span><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></span></footer>
-    </main>
+    </div>
   </>;
-}
-
-function AuthControls() {
-  const { isLoaded, userId } = useAuth();
-  if (!isLoaded) return <span className="small">Loading sign-in…</span>;
-  return userId ? <UserButton userProfileProps={{ additionalOAuthScopes: { google: [...providerScopes.youtube], spotify: [...providerScopes.spotify] } }} /> : <SignInButton mode="modal"><button className="connect">Sign in</button></SignInButton>;
 }
 
 function AuthSession({ onError }: { onError: (message: string | null) => void }) {

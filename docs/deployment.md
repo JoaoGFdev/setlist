@@ -14,7 +14,7 @@ Clerk sign-in is separate from connecting Spotify/YouTube. The app never treats 
 
 ## Local development
 
-1. Install the supported Node.js version from `package.json`, then run `npm install`.
+1. Install the supported Node.js version from `package.json`, then run `pnpm install`.
 2. Copy `.env.example` to `.env.local`. Vite and Cloudflare both load this file for local development. Only `VITE_` variables are exposed to the browser; keep server secrets unprefixed. Keep `.env.local` out of Git. Do not create `.dev.vars`, because it takes precedence and prevents Cloudflare from loading dotenv files.
 3. Add Clerk's publishable key and local secret key. Generate a 32-byte base64 encryption key, for example with `openssl rand -base64 32`, and place it in `TOKEN_ENCRYPTION_KEY` in `.env.local`. Do not paste keys into chat.
 4. Set `APP_URL=http://127.0.0.1:5173` (or the exact local address/port configured by the app). Add Spotify and Google OAuth client settings to `.env.local`.
@@ -24,7 +24,7 @@ Clerk sign-in is separate from connecting Spotify/YouTube. The app never treats 
    npx wrangler d1 migrations apply DB --local
    ```
 
-6. Run `npm run dev` and open its local URL. Sign in with Clerk, then connect each provider from the app.
+6. Run `pnpm dev` and open its local URL. Sign in with Clerk, then connect each provider from the app.
 
 Local D1 is separate from remote D1. Applying local migrations does not upload or import your old `.data/bridge.sqlite`; hosted users reconnect their providers. Your original `.data` directory is not deployed.
 
@@ -72,11 +72,11 @@ Set public/nonsecret bindings (`APP_URL`, provider client IDs, Clerk publishable
 Build and inspect a deployment before publishing:
 
 ```sh
-npm run build
+pnpm build
 npx wrangler deploy --dry-run
 ```
 
-Then deploy with `npx wrangler deploy` (or the repository's equivalent `npm run deploy` script). The Cloudflare Vite plugin emits deployment configuration and asset paths; use its generated configuration rather than uploading the old SPA `dist` as a Pages project. Attach the owned domain to the Worker and confirm `APP_URL`, Clerk and both provider callbacks match it.
+Then deploy with `pnpm exec wrangler deploy` (or the repository's equivalent `pnpm deploy` script). The Cloudflare Vite plugin emits deployment configuration and asset paths; use its generated configuration rather than uploading the old SPA `dist` as a Pages project. Attach the owned domain to the Worker and confirm `APP_URL`, Clerk and both provider callbacks match it.
 
 Do not commit a Cloudflare API token into GitHub Actions. If setting up CI later, use the repository's private secret store and narrowly scoped deployment credentials. This migration does not require automatic deployment or a paid resource.
 

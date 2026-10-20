@@ -10,7 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as HistoryRouteImport } from './routes/history'
+import { Route as LinkedRouteImport } from './routes/linked'
 import { Route as PrivacyPolicyRouteImport } from './routes/privacy-policy'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SsoCallbackRouteImport } from './routes/sso-callback'
 import { Route as TermsOfServiceRouteImport } from './routes/terms-of-service'
 import { Route as ApiSplatRouteImport } from './routes/api.$'
@@ -21,9 +24,24 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HistoryRoute = HistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LinkedRoute = LinkedRouteImport.update({
+  id: '/linked',
+  path: '/linked',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PrivacyPolicyRoute = PrivacyPolicyRouteImport.update({
   id: '/privacy-policy',
   path: '/privacy-policy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SsoCallbackRoute = SsoCallbackRouteImport.update({
@@ -49,7 +67,10 @@ const AuthSplatRoute = AuthSplatRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/history': typeof HistoryRoute
+  '/linked': typeof LinkedRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/settings': typeof SettingsRoute
   '/sso-callback': typeof SsoCallbackRoute
   '/terms-of-service': typeof TermsOfServiceRoute
   '/api/$': typeof ApiSplatRoute
@@ -57,7 +78,10 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/history': typeof HistoryRoute
+  '/linked': typeof LinkedRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/settings': typeof SettingsRoute
   '/sso-callback': typeof SsoCallbackRoute
   '/terms-of-service': typeof TermsOfServiceRoute
   '/api/$': typeof ApiSplatRoute
@@ -66,7 +90,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/history': typeof HistoryRoute
+  '/linked': typeof LinkedRoute
   '/privacy-policy': typeof PrivacyPolicyRoute
+  '/settings': typeof SettingsRoute
   '/sso-callback': typeof SsoCallbackRoute
   '/terms-of-service': typeof TermsOfServiceRoute
   '/api/$': typeof ApiSplatRoute
@@ -76,7 +103,10 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/history'
+    | '/linked'
     | '/privacy-policy'
+    | '/settings'
     | '/sso-callback'
     | '/terms-of-service'
     | '/api/$'
@@ -84,7 +114,10 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/history'
+    | '/linked'
     | '/privacy-policy'
+    | '/settings'
     | '/sso-callback'
     | '/terms-of-service'
     | '/api/$'
@@ -92,7 +125,10 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/history'
+    | '/linked'
     | '/privacy-policy'
+    | '/settings'
     | '/sso-callback'
     | '/terms-of-service'
     | '/api/$'
@@ -101,7 +137,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  HistoryRoute: typeof HistoryRoute
+  LinkedRoute: typeof LinkedRoute
   PrivacyPolicyRoute: typeof PrivacyPolicyRoute
+  SettingsRoute: typeof SettingsRoute
   SsoCallbackRoute: typeof SsoCallbackRoute
   TermsOfServiceRoute: typeof TermsOfServiceRoute
   ApiSplatRoute: typeof ApiSplatRoute
@@ -117,11 +156,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/history': {
+      id: '/history'
+      path: '/history'
+      fullPath: '/history'
+      preLoaderRoute: typeof HistoryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/linked': {
+      id: '/linked'
+      path: '/linked'
+      fullPath: '/linked'
+      preLoaderRoute: typeof LinkedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/privacy-policy': {
       id: '/privacy-policy'
       path: '/privacy-policy'
       fullPath: '/privacy-policy'
       preLoaderRoute: typeof PrivacyPolicyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/sso-callback': {
@@ -157,7 +217,10 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  HistoryRoute: HistoryRoute,
+  LinkedRoute: LinkedRoute,
   PrivacyPolicyRoute: PrivacyPolicyRoute,
+  SettingsRoute: SettingsRoute,
   SsoCallbackRoute: SsoCallbackRoute,
   TermsOfServiceRoute: TermsOfServiceRoute,
   ApiSplatRoute: ApiSplatRoute,
