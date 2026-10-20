@@ -28,7 +28,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <img src={iconUrl} alt="" className="size-7" /> Setlist
         </Link>
         <nav aria-label="Primary" className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          {nav.map(item => <Link key={item.to} to={item.to} activeOptions={{ exact: item.to === '/' }}
+          {nav.map(item => <Link key={item.to} to={item.to} aria-label={item.label} activeOptions={{ exact: item.to === '/' }}
             className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'text-muted-foreground data-[status=active]:bg-muted data-[status=active]:text-foreground')}>
             <item.icon data-icon="inline-start" /><span className="hidden sm:inline">{item.label}</span>
           </Link>)}

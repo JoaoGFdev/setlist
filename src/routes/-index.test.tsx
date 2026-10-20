@@ -25,7 +25,7 @@ vi.mock('@tanstack/react-router', () => ({
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock, Toaster: () => null }));
 
-import { App } from './index';
+import { App } from '@/components/workspace/workspace-page';
 
 const status = {
   accounts: { spotify: { id: 'sp-user', name: 'Spotify listener' }, youtube: { id: 'yt-user', name: 'YouTube listener' } },

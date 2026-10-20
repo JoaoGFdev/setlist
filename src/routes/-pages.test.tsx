@@ -23,9 +23,9 @@ vi.mock('@tanstack/react-router', async () => {
 
 vi.mock('next-themes', () => ({ useTheme: () => ({ theme: 'system', setTheme: vi.fn() }) }));
 
-import { HistoryPage } from './history';
-import { LinkedPage } from './linked';
-import { SettingsPage } from './settings';
+import { HistoryPage } from '@/components/pages/history-page';
+import { LinkedPage } from '@/components/pages/linked-page';
+import { SettingsPage } from '@/components/pages/settings-page';
 
 const base = {
   source: 'spotify', destination: 'youtube', sourceAccount: 'sp', destinationAccount: 'yt', sourcePlaylistId: 'p1', sourcePlaylistName: 'Night drive',
