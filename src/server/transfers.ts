@@ -79,7 +79,8 @@ export class Transfers {
       const now = timestamp();
       const job: JobSummary = {
         id: crypto.randomUUID(), source, destination, sourceAccount: sourceCredentials.account.id,
-        destinationAccount: destinationCredentials.account.id, sourcePlaylistId: playlist.id, name: name || playlist.name,
+        destinationAccount: destinationCredentials.account.id, sourcePlaylistId: playlist.id,
+        sourcePlaylistName: playlist.name, sourcePlaylistUrl: playlist.url, sourcePlaylistImage: playlist.image, name: name || playlist.name,
         phase: 'loading', state: 'running', sourcePosition: 0, sourceDone: false, matchPosition: 0,
         discoveryMatches: 0, createAttempted: false,
         reconcilePosition: 0, reconcileChecked: 0, inserted: 0,
@@ -87,6 +88,26 @@ export class Transfers {
       };
       await this.save(job, token);
       return { ...job, items: [] };
+    });
+  }
+
+  /** Removes saved transfer records only; remote playlists are never touched. */
+  async delete(id: string): Promise<void> {
+    await this.withLease(async (token) => {
+      await this.requiredJob(id);
+      await this.assertLease(token);
+      // Remove the job document last so an interrupted delete can be retried.
+      await this.store.deletePrefix(ITEM_PREFIX(id));
+      await this.store.delete(EXPECTED_KEY(id));
+      await this.store.delete(`job:${id}`);
+    });
+  }
+  async clear(): Promise<void> {
+    await this.withLease(async (token) => {
+      await this.assertLease(token);
+      await this.store.deletePrefix('item:');
+      await this.store.deletePrefix('expected:');
+      await this.store.deletePrefix('job:');
     });
   }
 

@@ -19,9 +19,13 @@ vi.mock('@clerk/tanstack-react-start', async () => {
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: () => (options: unknown) => ({ options }),
+  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string }) => <a href={to} {...props}>{children}</a>,
 }));
 
-import { App } from './index';
+const toastMock = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }));
+vi.mock('sonner', () => ({ toast: toastMock, Toaster: () => null }));
+
+import { App } from '@/components/workspace/workspace-page';
 
 const status = {
   accounts: { spotify: { id: 'sp-user', name: 'Spotify listener' }, youtube: { id: 'yt-user', name: 'YouTube listener' } },
@@ -50,8 +54,8 @@ const requestPath = (input: RequestInfo | URL) => String(input);
 const method = (init?: RequestInit) => init?.method || 'GET';
 
 describe('authenticated workspace UI', () => {
-  beforeEach(() => { authState.userId = null; clerkAuthorize.mockClear(); });
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  beforeEach(() => { authState.userId = null; clerkAuthorize.mockClear(); toastMock.success.mockClear(); toastMock.error.mockClear(); });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/'); });
 
   it('requests playlist consent through an already linked Clerk account', async () => {
     authState.userId = 'clerk-user-1';
@@ -65,10 +69,26 @@ describe('authenticated workspace UI', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
     const spotify = await screen.findByRole('region', { name: 'Spotify library' });
-    await userEvent.setup().click(within(spotify).getByRole('button', { name: 'Allow playlist access' }));
+    await userEvent.setup().click(within(spotify).getByRole('button', { name: 'Connect' }));
     await waitFor(() => expect(clerkAuthorize).toHaveBeenCalledOnce());
     expect(clerkAuthorize).toHaveBeenCalledWith({ additionalScopes: ['playlist-read-private', 'playlist-read-collaborative', 'playlist-modify-private', 'playlist-modify-public'], redirectUrl: `${window.location.origin}/sso-callback` });
     expect(fetchMock.mock.calls.some(([input]) => requestPath(input) === '/api/accounts/spotify/connect')).toBe(true);
+  });
+
+  it('still offers each provider\'s Connect button when account status cannot load', async () => {
+    authState.userId = 'clerk-user-1';
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = requestPath(input);
+      if (path === '/api/status') return json({ error: 'Sign in to use your transfer workspace.' }, 401);
+      if (path === '/api/jobs') return json({ error: 'Sign in to use your transfer workspace.' }, 401);
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+    render(<App />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Sign in to use your transfer workspace.');
+    for (const name of ['Spotify library', 'YouTube library']) {
+      const library = await screen.findByRole('region', { name });
+      expect(within(library).getByRole('button', { name: 'Connect' })).toBeTruthy();
+    }
   });
 
   it('does not read private APIs while signed out, then loads the workspace after sign-in', async () => {
@@ -145,11 +165,132 @@ describe('authenticated workspace UI', () => {
     await screen.findByRole('heading', { name: 'Night drive' });
     await user.click(screen.getByRole('button', { name: 'Continue transfer' }));
     await waitFor(() => expect(stepCount).toBe(1));
-    const picker = screen.getByRole('combobox', { name: 'Transfer' });
-    await user.selectOptions(picker, 'job-2');
+    const picker = screen.getByRole('combobox', { name: 'Transfer history' });
+    await user.click(picker);
+    await user.click(await screen.findByRole('option', { name: /Saved transfer/ }));
     expect(await screen.findByRole('heading', { name: 'Saved transfer' })).toBeTruthy();
     finishStep(json(summary(jobOne, { matchedCount: 1 })));
     await waitFor(() => expect(stepCount).toBe(1));
-    expect(within(picker).getByRole('option', { name: /Saved transfer/ })).toBeTruthy();
+    expect(picker.textContent).toContain('Saved transfer');
+  });
+
+  describe('library list', () => {
+    const second = { ...playlist, id: 'playlist-2', name: 'Morning run', url: 'https://open.spotify.com/playlist/playlist-2' };
+    const hiddenEntry = { provider: 'spotify', id: 'playlist-1', name: 'Night drive', hiddenAt: '2026-10-20T00:00:00.000Z' };
+
+    function libraryMock(options: { jobs?: unknown[]; spotify?: unknown[]; youtube?: unknown[]; hiddenResponse?: unknown; fullJobs?: Record<string, unknown> } = {}) {
+      return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = requestPath(input); const requestMethod = method(init);
+        if (path === '/api/status') return json(status);
+        if (path === '/api/jobs' && requestMethod === 'GET') return json(options.jobs ?? []);
+        if (path === '/api/preferences') return json({ hiddenPlaylists: [] });
+        if (path === '/api/playlists/spotify') return json({ items: options.spotify ?? [playlist, second] });
+        if (path === '/api/playlists/youtube') return json({ items: options.youtube ?? [] });
+        if (path === '/api/playlists/spotify/hidden' && requestMethod === 'POST') return json(options.hiddenResponse ?? { hiddenPlaylists: [hiddenEntry] });
+        const full = Object.entries(options.fullJobs ?? {}).find(([id]) => path === `/api/jobs/${id}`);
+        if (full && requestMethod === 'GET') return json(full[1]);
+        throw new Error(`Unexpected request: ${requestMethod} ${path}`);
+      });
+    }
+
+    it('hides a playlist, offers undo, and reveals it again with Show hidden', async () => {
+      const fetchMock = libraryMock();
+      vi.stubGlobal('fetch', fetchMock);
+      authState.userId = 'clerk-user-1';
+      const user = userEvent.setup();
+      render(<App />);
+      const spotify = await screen.findByRole('region', { name: 'Spotify library' });
+      await within(spotify).findByText('Night drive');
+      await user.click(within(spotify).getByRole('button', { name: 'More actions for Night drive' }));
+      await user.click(await screen.findByRole('menuitem', { name: 'Hide from list' }));
+
+      await waitFor(() => expect(within(spotify).queryByText('Night drive')).toBeNull());
+      expect(within(spotify).getByText('Morning run')).toBeTruthy();
+      const post = fetchMock.mock.calls.find(([input, init]) => requestPath(input) === '/api/playlists/spotify/hidden' && method(init) === 'POST');
+      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ playlistId: 'playlist-1', name: 'Night drive', hidden: true });
+      const undo = toastMock.success.mock.calls[0]?.[1]?.action as { label: string; onClick: () => void };
+      expect(undo.label).toBe('Undo');
+
+      await user.click(within(spotify).getByRole('switch', { name: 'Show hidden (1)' }));
+      expect(await within(spotify).findByText('Night drive')).toBeTruthy();
+      expect(within(spotify).getByText('Hidden')).toBeTruthy();
+
+      undo.onClick();
+      await waitFor(() => expect(fetchMock.mock.calls.filter(([input, init]) => requestPath(input) === '/api/playlists/spotify/hidden' && method(init) === 'POST')).toHaveLength(2));
+    });
+
+    it('keeps every playlist visible when preferences are unavailable', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = requestPath(input);
+        if (path === '/api/status') return json(status);
+        if (path === '/api/jobs') return json([]);
+        if (path === '/api/preferences') return json({ error: 'Not found' }, 404);
+        if (path === '/api/playlists/spotify') return json({ items: [playlist] });
+        if (path === '/api/playlists/youtube') return json({ items: [] });
+        throw new Error(`Unexpected request: ${path}`);
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      authState.userId = 'clerk-user-1';
+      render(<App />);
+      const spotify = await screen.findByRole('region', { name: 'Spotify library' });
+      expect(await within(spotify).findByText('Night drive')).toBeTruthy();
+      expect(within(spotify).queryByRole('switch')).toBeNull();
+    });
+
+    it('marks linked playlists and opens the linked transfer from the badge', async () => {
+      const jobOne = fullJob('job-1', { sourcePlaylistId: 'other-playlist' });
+      const jobTwo = fullJob('job-2', { phase: 'complete', state: 'idle', destinationId: 'yt-created', destinationUrl: 'https://music.youtube.com/playlist?list=yt-created', inserted: 1 });
+      const created = { ...playlist, id: 'yt-created', name: 'Night drive (Setlist)', url: 'https://www.youtube.com/playlist?list=yt-created' };
+      vi.stubGlobal('fetch', libraryMock({ jobs: [summary(jobOne), summary(jobTwo)], spotify: [playlist, second], youtube: [created], fullJobs: { 'job-1': jobOne, 'job-2': jobTwo } }));
+      authState.userId = 'clerk-user-1';
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByRole('heading', { name: 'Night drive' });
+      const spotify = screen.getByRole('region', { name: 'Spotify library' });
+      const badge = await within(spotify).findByRole('button', { name: /Linked → YouTube/ });
+      expect(within(spotify).getAllByRole('button', { name: /Linked/ })).toHaveLength(1);
+      expect(within(screen.getByRole('region', { name: 'YouTube library' })).getByRole('button', { name: /Created by Setlist/ })).toBeTruthy();
+      await user.click(badge);
+      expect(await screen.findByRole('heading', { name: 'Saved transfer' })).toBeTruthy();
+    });
+
+    it('shows In progress for an unfinished transfer of a playlist', async () => {
+      const job = fullJob('job-1');
+      vi.stubGlobal('fetch', libraryMock({ jobs: [summary(job)], fullJobs: { 'job-1': job } }));
+      authState.userId = 'clerk-user-1';
+      render(<App />);
+      const spotify = await screen.findByRole('region', { name: 'Spotify library' });
+      expect(await within(spotify).findByRole('button', { name: /In progress/ })).toBeTruthy();
+    });
+
+    it('removes a transfer from history after confirmation and opens the next one', async () => {
+      const jobOne = fullJob('job-1');
+      const jobTwo = fullJob('job-2', { state: 'paused', message: 'Waiting to resume.' });
+      const base = libraryMock({ jobs: [summary(jobOne), summary(jobTwo)], fullJobs: { 'job-1': jobOne, 'job-2': jobTwo } });
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) =>
+        requestPath(input) === '/api/jobs/job-1/delete' && method(init) === 'POST' ? json({ ok: true }) : base(input, init));
+      vi.stubGlobal('fetch', fetchMock);
+      authState.userId = 'clerk-user-1';
+      const user = userEvent.setup();
+      render(<App />);
+      await screen.findByRole('heading', { name: 'Night drive' });
+      await user.click(screen.getByRole('button', { name: 'Transfer actions' }));
+      await user.click(await screen.findByRole('menuitem', { name: 'Remove from history' }));
+      expect(await screen.findByText(/doesn’t delete any playlist on Spotify or YouTube/)).toBeTruthy();
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove from history' }));
+      expect(await screen.findByRole('heading', { name: 'Saved transfer' })).toBeTruthy();
+      expect(fetchMock.mock.calls.some(([input, init]) => requestPath(input) === '/api/jobs/job-1/delete' && method(init) === 'POST')).toBe(true);
+    });
+
+    it('opens the transfer named by the ?job= search param', async () => {
+      const jobOne = fullJob('job-1');
+      const jobTwo = fullJob('job-2', { state: 'paused', message: 'Waiting to resume.' });
+      vi.stubGlobal('fetch', libraryMock({ jobs: [summary(jobOne), summary(jobTwo)], fullJobs: { 'job-1': jobOne, 'job-2': jobTwo } }));
+      window.history.replaceState(null, '', '/?job=job-2');
+      authState.userId = 'clerk-user-1';
+      render(<App />);
+      expect(await screen.findByRole('heading', { name: 'Saved transfer' })).toBeTruthy();
+      expect(screen.queryByRole('heading', { name: 'Night drive' })).toBeNull();
+    });
   });
 });

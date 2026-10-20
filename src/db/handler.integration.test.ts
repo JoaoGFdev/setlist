@@ -1,6 +1,6 @@
 import { applyD1Migrations, env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import type { JobItem, JobSummary } from '../../shared/types';
+import type { JobItem, JobSummary, Preferences } from '../../shared/types';
 import type { AppEnv } from '../server/env';
 import { dispatchApi, dispatchOAuth } from '../server/handler';
 import { Store } from '../server/store';
@@ -84,6 +84,144 @@ describe('HTTP dispatch security and tenant contract', () => {
     expect(connected.status).toBe(200);
     expect(await workspace.get('connection-disabled:spotify')).toBeUndefined();
     expect(await workspace.get('connection-disabled:youtube')).toEqual({ disabled: true });
+  });
+
+  it('keeps hidden-playlist preferences through disconnect while deleting transfer history', async () => {
+    const userId = `disconnect-prefs-${crypto.randomUUID()}`;
+    const workspace = store(userId);
+    const hidden = await dispatchApi(request('/api/playlists/spotify/hidden', { method: 'POST', origin: appEnv.APP_URL, body: { playlistId: 'p1', name: 'Keep hidden', hidden: true } }), appEnv, userId);
+    expect(hidden.status).toBe(200);
+    await workspace.set('job:old', job('old'));
+    await workspace.set('expected:old', { ids: ['a'] });
+    const disconnected = await dispatchApi(request('/api/accounts/spotify/disconnect', { method: 'POST', origin: appEnv.APP_URL }), appEnv, userId);
+    expect(disconnected.status).toBe(200);
+    expect(await workspace.get('job:old')).toBeUndefined();
+    expect(await workspace.get('expected:old')).toBeUndefined();
+    const prefs = await (await dispatchApi(request('/api/preferences'), appEnv, userId)).json() as Preferences;
+    expect(prefs.hiddenPlaylists.map((entry) => entry.id)).toEqual(['p1']);
+  });
+
+  it('hides and unhides playlists idempotently, newest first, scoped to the user', async () => {
+    const userId = `prefs-user-${crypto.randomUUID()}`;
+    const hide = async (provider: string, body: unknown, user = userId) =>
+      dispatchApi(request(`/api/playlists/${provider}/hidden`, { method: 'POST', origin: appEnv.APP_URL, body }), appEnv, user);
+    const empty = await dispatchApi(request('/api/preferences'), appEnv, userId);
+    expect(await empty.json()).toEqual({ hiddenPlaylists: [] });
+
+    const first = await hide('spotify', { playlistId: 'p1', name: '  Old name  ', image: 'https://img.example/1.jpg', hidden: true });
+    expect(first.status).toBe(200);
+    const firstPrefs = await first.json() as Preferences;
+    expect(firstPrefs.hiddenPlaylists).toMatchObject([{ provider: 'spotify', id: 'p1', name: 'Old name', image: 'https://img.example/1.jpg' }]);
+    const originalHiddenAt = firstPrefs.hiddenPlaylists[0].hiddenAt;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const again = await (await hide('spotify', { playlistId: 'p1', name: 'New name', hidden: true })).json() as Preferences;
+    expect(again.hiddenPlaylists).toHaveLength(1);
+    expect(again.hiddenPlaylists[0]).toMatchObject({ name: 'New name', hiddenAt: originalHiddenAt });
+    expect(again.hiddenPlaylists[0].image).toBeUndefined();
+
+    const second = await (await hide('youtube', { playlistId: 'p1', name: 'Same id other provider', hidden: true })).json() as Preferences;
+    expect(second.hiddenPlaylists.map((entry) => entry.provider)).toEqual(['youtube', 'spotify']);
+
+    const other = await dispatchApi(request('/api/preferences'), appEnv, `${userId}-other`);
+    expect(await other.json()).toEqual({ hiddenPlaylists: [] });
+
+    const unhidden = await (await hide('spotify', { playlistId: 'p1', name: 'x', hidden: false })).json() as Preferences;
+    expect(unhidden.hiddenPlaylists.map((entry) => entry.provider)).toEqual(['youtube']);
+    const noop = await (await hide('spotify', { playlistId: 'never-hidden', name: 'x', hidden: false })).json() as Preferences;
+    expect(noop.hiddenPlaylists).toHaveLength(1);
+    const persisted = await dispatchApi(request('/api/preferences'), appEnv, userId);
+    expect(await persisted.json()).toEqual(noop);
+    expect(await store(userId).get<{ expiresAt?: number }>('preferences')).not.toHaveProperty('expiresAt');
+  });
+
+  it('validates hidden-playlist input and the entry cap', async () => {
+    const userId = `prefs-invalid-${crypto.randomUUID()}`;
+    const hide = async (provider: string, body: unknown) =>
+      dispatchApi(request(`/api/playlists/${provider}/hidden`, { method: 'POST', origin: appEnv.APP_URL, body }), appEnv, userId);
+    const valid = { playlistId: 'p1', name: 'Name', hidden: true };
+    expect((await hide('deezer', valid)).status).toBe(400);
+    expect((await hide('spotify', { ...valid, playlistId: '' })).status).toBe(400);
+    expect((await hide('spotify', { ...valid, playlistId: 'x'.repeat(201) })).status).toBe(400);
+    expect((await hide('spotify', { ...valid, name: '   ' })).status).toBe(400);
+    expect((await hide('spotify', { ...valid, name: 'x'.repeat(301) })).status).toBe(400);
+    expect((await hide('spotify', { ...valid, hidden: 'yes' })).status).toBe(400);
+    expect((await hide('spotify', { ...valid, image: 'http://img.example/a.jpg' })).status).toBe(400);
+    expect((await hide('spotify', { ...valid, image: 'javascript:alert(1)' })).status).toBe(400);
+    expect((await hide('spotify', { ...valid, image: 'not a url' })).status).toBe(400);
+    expect((await hide('spotify', { ...valid, image: `https://img.example/${'a'.repeat(2000)}` })).status).toBe(400);
+    expect((await dispatchApi(request('/api/playlists/spotify/hidden', { method: 'POST', body: valid }), appEnv, userId)).status).toBe(403);
+    expect(await (await dispatchApi(request('/api/preferences'), appEnv, userId)).json()).toEqual({ hiddenPlaylists: [] });
+
+    await store(userId).set('preferences', { hiddenPlaylists: Array.from({ length: 1000 }, (_, index) => ({ provider: 'spotify', id: `p${index}`, name: 'n', hiddenAt: new Date(index).toISOString() })) });
+    const capped = await hide('spotify', { playlistId: 'extra', name: 'Extra', hidden: true });
+    expect(capped.status).toBe(409);
+    expect(await capped.json()).toMatchObject({ error: expect.stringContaining('1000') });
+    expect((await hide('spotify', { playlistId: 'p5', name: 'Renamed', hidden: true })).status).toBe(200);
+    expect((await hide('spotify', { playlistId: 'p5', name: 'Renamed', hidden: false })).status).toBe(200);
+  });
+
+  it('deletes one job with its items and approved list, 404s unknown ids, and is tenant scoped', async () => {
+    const userId = `delete-job-${crypto.randomUUID()}`;
+    const mine = store(userId);
+    const stranger = store(`${userId}-stranger`);
+    const item: JobItem = { source: { id: 't', title: 'T', artist: 'A', url: 'https://x.example/t' }, candidates: [], selected: null, searched: true };
+    for (const id of ['keep', 'drop']) {
+      await mine.set(`job:${id}`, job(id));
+      await mine.set(`item:${id}:00000000`, item);
+      await mine.set(`item:${id}:00000001`, item);
+      await mine.set(`expected:${id}`, { ids: ['t'] });
+    }
+    await stranger.set('job:drop', job('drop'));
+    const post = (path: string, user = userId) => dispatchApi(request(path, { method: 'POST', origin: appEnv.APP_URL, body: {} }), appEnv, user);
+
+    const deleted = await post('/api/jobs/drop/delete');
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ ok: true });
+    expect(await mine.get('job:drop')).toBeUndefined();
+    expect(await mine.list('item:drop:')).toEqual([]);
+    expect(await mine.get('expected:drop')).toBeUndefined();
+    expect(await mine.get('job:keep')).toBeDefined();
+    expect(await mine.list('item:keep:')).toHaveLength(2);
+    expect(await mine.get('expected:keep')).toBeDefined();
+    expect(await stranger.get('job:drop')).toBeDefined();
+
+    expect((await post('/api/jobs/drop/delete')).status).toBe(404);
+    expect((await post('/api/jobs/never-existed/delete')).status).toBe(404);
+    expect((await dispatchApi(request('/api/jobs/keep/delete', { method: 'POST', body: {} }), appEnv, userId)).status).toBe(403);
+
+    const lease = await mine.acquireLease('workspace', 5_000);
+    const busy = await post('/api/jobs/keep/delete');
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toMatchObject({ error: expect.stringContaining('Another operation is active') });
+    await mine.releaseLease('workspace', lease!);
+    expect(await mine.get('job:keep')).toBeDefined();
+  });
+
+  it('clears all transfer history but keeps preferences, credentials and disabled-connection markers', async () => {
+    const userId = `clear-jobs-${crypto.randomUUID()}`;
+    const mine = store(userId);
+    const stranger = store(`${userId}-stranger`);
+    await mine.saveCredentials('spotify', { access_token: 't', expiresAt: Date.now() + 60_000, account: { id: 'a', name: 'A' } });
+    await mine.set('connection-disabled:youtube', { disabled: true });
+    await mine.set('preferences', { hiddenPlaylists: [{ provider: 'spotify', id: 'p1', name: 'Hidden', hiddenAt: new Date().toISOString() }] });
+    for (const id of ['one', 'two']) {
+      await mine.set(`job:${id}`, job(id));
+      await mine.set(`item:${id}:00000000`, { searched: true });
+      await mine.set(`expected:${id}`, { ids: ['t'] });
+    }
+    await stranger.set('job:one', job('one'));
+
+    const cleared = await dispatchApi(request('/api/jobs/clear', { method: 'POST', origin: appEnv.APP_URL, body: {} }), appEnv, userId);
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toEqual({ ok: true });
+    expect(await (await dispatchApi(request('/api/jobs'), appEnv, userId)).json()).toEqual([]);
+    expect(await mine.list('item:')).toEqual([]);
+    expect(await mine.list('expected:')).toEqual([]);
+    expect(await mine.credentials('spotify')).toBeDefined();
+    expect(await mine.get('connection-disabled:youtube')).toEqual({ disabled: true });
+    expect((await (await dispatchApi(request('/api/preferences'), appEnv, userId)).json() as Preferences).hiddenPlaylists).toHaveLength(1);
+    expect(await stranger.get('job:one')).toBeDefined();
   });
 
   it('returns only the authenticated user’s accounts and jobs, including for a guessed job ID', async () => {

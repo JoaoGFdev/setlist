@@ -38,6 +38,10 @@ export interface JobMetadata {
   sourceAccount: string;
   destinationAccount: string;
   sourcePlaylistId: string;
+  /** Source playlist details captured when the job was created. Absent on jobs created before they were recorded. */
+  sourcePlaylistName?: string;
+  sourcePlaylistUrl?: string;
+  sourcePlaylistImage?: string;
   name: string;
   phase: JobPhase;
   state: JobState;
@@ -77,3 +81,14 @@ export interface Status {
 }
 
 export interface Page<T> { items: T[]; nextCursor?: string }
+
+/** A playlist the user chose to keep out of their library lists. Display details are captured when hidden. */
+export interface HiddenPlaylist {
+  provider: Provider;
+  id: string;
+  name: string;
+  image?: string;
+  hiddenAt: string;
+}
+
+export interface Preferences { hiddenPlaylists: HiddenPlaylist[] }

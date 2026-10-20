@@ -9,11 +9,11 @@ Built with **TanStack Start**, **Clerk**, **Drizzle**, and **Cloudflare Workers 
 Requires Node.js 24+, a Clerk app, a Spotify Premium account, and your own Spotify/Google OAuth app registrations. Production Clerk authentication requires a domain you own.
 
 ```sh
-npm install
+pnpm install
 cp .env.example .env.local
 # Configure Clerk/provider keys and a persistent encryption secret.
-npx wrangler d1 migrations apply DB --local
-npm run dev
+pnpm exec wrangler d1 migrations apply DB --local
+pnpm dev
 ```
 
 Open **http://127.0.0.1:5173**. See [deployment and setup](docs/deployment.md) for local bindings, exact callbacks, D1 migrations, Worker secrets and production deployment.
@@ -23,9 +23,9 @@ Clerk identifies each user; Spotify and YouTube grants are separate provider con
 The open browser requests one bounded step at a time. Closing it stops further requests; resume later from saved progress. Source playlists remain unchanged and approved destinations are private. Large playlists can span multiple days due to YouTube quotas.
 
 ```sh
-npm test
-npm run build
-npm run dry-run
+pnpm test
+pnpm build
+pnpm dry-run
 ```
 
 Delivery: [migration spec](docs/specs/cloudflare-migration.md), [Luna issue assignments](docs/orchestration.md), [MCP support](docs/mcp.md).
