@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { LinkedPlaylists } from '@/components/pages/linked-playlists';
-import { PageHeader } from '@/components/pages/page-header';
+import { PageHeader } from '@/components/page-header';
 import { RequireSignIn } from '@/components/pages/require-sign-in';
 
 export const Route = createFileRoute('/linked')({

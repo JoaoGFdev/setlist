@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { PageHeader } from '@/components/pages/page-header';
+import { PageHeader } from '@/components/page-header';
 import { RequireSignIn } from '@/components/pages/require-sign-in';
 import { Appearance, ConnectedAccounts, HiddenPlaylists, YourData } from '@/components/pages/settings-sections';
 

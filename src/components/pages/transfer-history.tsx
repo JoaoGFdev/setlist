@@ -6,7 +6,7 @@ import type { JobSummary } from '../../../shared/types';
 import { ClearHistoryDialog } from '@/components/pages/clear-history-dialog';
 import { ConfirmDialog } from '@/components/pages/confirm-dialog';
 import { Cover, Direction, JobStatusBadge, RelativeDate, TrackCounts, jobStage, sourceName, stageLabels, viewTransferHref, type JobStage } from '@/components/pages/job-display';
-import { PageHeader } from '@/components/pages/page-header';
+import { PageHeader } from '@/components/page-header';
 import { RetryAlert } from '@/components/pages/retry-alert';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
