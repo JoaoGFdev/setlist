@@ -1,10 +1,10 @@
 {
   "compilerOptions": {
-    "target": "ES2023", "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx",
     "strict": true, "esModuleInterop": true, "skipLibCheck": true,
     "allowImportingTsExtensions": true, "noEmit": true,
-    "types": ["node", "vite/client"]
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "node", "vite/client"]
   },
-  "include": ["src", "server", "shared", "vite.config.ts"]
+  "include": ["src", "shared", "vite.config.ts", "drizzle.config.ts", "vitest.config.ts", "vitest.ui.config.ts"]
 }

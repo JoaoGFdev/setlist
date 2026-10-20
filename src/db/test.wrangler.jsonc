@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "playlist-bridge-persistence-tests",
+  "compatibility_date": "2026-08-22",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "playlist-bridge-test",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "../../drizzle"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { Candidate, Provider, Track } from '../shared/types.ts';
+import type { Candidate, Provider, Track } from '../../shared/types';
 
 export function normalize(value: string): string {
   return value.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -6,10 +6,10 @@ export function normalize(value: string): string {
 function coverage(needle: string, haystack: string) {
   const words = normalize(needle).split(' ').filter(Boolean);
   const found = new Set(normalize(haystack).split(' '));
-  return words.length ? words.filter(w => found.has(w)).length / words.length : 0;
+  return words.length ? words.filter((word) => found.has(word)).length / words.length : 0;
 }
 export function rank(source: Track, candidates: Track[], destination: Provider): Candidate[] {
-  return candidates.map(candidate => {
+  return candidates.map((candidate) => {
     const text = `${candidate.title} ${candidate.artist}`;
     let score = coverage(source.title, text) * 60 + coverage(source.artist, text) * 25;
     if (destination === 'youtube' && /official (music )?video/i.test(candidate.title)) score += 15;

@@ -1,12 +1,31 @@
-# Validation performed
+# Cloudflare migration validation
 
-2026-10-19, Node.js 24.22.0.
+Verified 2026-10-20 with Node.js 24.22.0, the committed package lock, Wrangler 4.151.3, and compatibility date 2026-10-19 (supported by the installed local Workers runtime).
 
-- `npm test`: nine tests passed. Covers duplicate-preserving ordered recovery after an ambiguous remote write, saved matching checkpoints after quota failure, restart and account-change protection, encrypted credentials, video ranking, quota error handling, current Spotify item pagination and unavailable entries, and marker-based destination creation recovery.
-- `npm run build`: TypeScript check and Vite production build passed.
-- Local HTTP checks: status endpoint, invalid request rejection, same-origin requirement for writes, cross-site request rejection, invalid Host rejection, unconnected-account response, and invalid OAuth callback redirect passed.
-- Compiled React bundle rendered with fixture API responses in T3's headless HTML renderer at desktop and 390px mobile widths. Desktop setup panel exposes both callback URLs. Mobile renders both libraries and paginated track review without horizontal overflow; opening match review, skipping a match, updating the count, approving, and displaying the completed playlist link passed. These are fixture UI checks, not live provider transfers.
+## Automated checks
 
-T3 collaborative-browser snapshots timed out twice; the alternative computer-use browser was unavailable. The separate headless renderer was used for layout and fixture UI verification.
+`npm test` passes **22 tests**:
 
-Live Spotify and Google OAuth, real playlist visibility, quota allocation, and a private test transfer remain unverified until the owner registers both OAuth apps and supplies credentials locally. No real accounts were connected and no remote playlists were created.
+- **9 D1/HTTP tests** run inside the local Workers runtime against the committed generated Drizzle migration. They verify tenant-scoped documents/accounts/jobs, encrypted credentials with user/provider authenticated data, ciphertext tampering and row-swap rejection, prefix ordering, expiration and batched writes, lease contention/expiry, atomic stale-writer fencing, HTTP auth/Origin validation, and user/cookie-bound one-time OAuth state.
+- **3 UI fixture tests** use mocked Clerk and API responses to verify sign-in-triggered loading, bounded-step progression without full-job reads after every step, and job-switch cancellation/handoff. These are fixture tests, not real Clerk login.
+- **10 domain tests** verify one-page/source and one-item/matching progression, quota pauses, positional duplicates, ambiguous insertion recovery, checkpoint write failure, approval/edit restrictions, paginated marker discovery and later-page duplicate rejection, summary records, account identity and OAuth binding.
+
+`npm run build` passes both Vite client/Workers SSR builds and TypeScript checking. The production client bundle contains no `cloudflare:workers` import. Runtime source has no Express, `node:sqlite`, or Node filesystem storage dependency.
+
+`wrangler d1 migrations apply DB --local` successfully applies the generated migration. A second Drizzle schema generation reports no schema changes. SQL snapshots and the migration journal are tracked for future migrations.
+
+`wrangler deploy --dry-run` passes using the generated Workers configuration. Reported upload size is approximately **2,314 KiB raw / 486 KiB gzip**; bindings are D1, static assets and configured application origin. This did not deploy or provision remote resources.
+
+## Runtime/browser checks
+
+The real local TanStack Start application at `http://127.0.0.1:5173` returns HTTP 200 for its public setup page. With Clerk unconfigured, `/api/status` and provider callbacks return HTTP 503 JSON rather than exposing data or bypassing authentication.
+
+The T3 collaborative browser loaded and hydrated the app, opened Account setup, displayed both provider callback instructions, and showed no horizontal overflow at a verified 390×844 viewport. The unconfigured/signed-out screen made no private `/api/` requests. The signed-in workflow is covered by fixture tests because live Clerk keys were not supplied.
+
+An independent Luna review identified lease check/write atomicity and incomplete cross-page marker detection. Both findings were corrected and re-reviewed; see [the review record](reviews/transfer-review.md).
+
+## Not yet verified
+
+No real Clerk, Spotify or Google account was connected. Live OAuth/token refresh, actual account playlist visibility, production DNS, remote D1, Cloudflare deployment and production CPU usage still require the owner's domain, account registrations and secrets. Free-plan limits and provider quotas remain operational constraints; local build/dry-run success does not prove production traffic will stay within those limits.
+
+Cloudflare's public documentation MCP was successfully initialized and queried. Cloudflare account MCP and Clerk MCP were not authorized; their official URLs and connection instructions are in [MCP setup](mcp.md).
