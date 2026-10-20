@@ -65,7 +65,7 @@ describe('authenticated workspace UI', () => {
 
   it('reuses workspace, transfer and playlist data after leaving and returning', async () => {
     authState.userId = 'clerk-user-1';
-    const job = fullJob('job-1');
+    const job = fullJob('job-1', { phase: 'review', state: 'idle' });
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = requestPath(input);
       if (path === '/api/status') return json(status);
@@ -194,7 +194,7 @@ describe('authenticated workspace UI', () => {
     const user = userEvent.setup();
     renderApp();
     await screen.findByRole('heading', { name: 'Night drive' });
-    await user.click(screen.getByRole('button', { name: 'Continue transfer' }));
+    // A running transfer picks up again on its own when opened.
     await waitFor(() => expect(stepCount).toBe(1));
     const picker = screen.getByRole('combobox', { name: 'Transfer history' });
     await user.click(picker);
@@ -344,8 +344,7 @@ describe('authenticated workspace UI', () => {
       const user = userEvent.setup();
       renderApp();
       await screen.findByRole('heading', { name: 'Night drive' });
-      await user.click(screen.getByRole('button', { name: 'Transfer actions' }));
-      await user.click(await screen.findByRole('menuitem', { name: 'Remove from history' }));
+      await user.click(screen.getByRole('button', { name: 'Remove from history' }));
       expect(await screen.findByText(/doesn’t delete any playlist on Spotify or YouTube/)).toBeTruthy();
       await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove from history' }));
       expect(await screen.findByRole('heading', { name: 'Saved transfer' })).toBeTruthy();

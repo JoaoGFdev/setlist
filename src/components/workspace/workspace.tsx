@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { FullJob, JobSummary, Playlist, Preferences, Provider, Status } from '../../../shared/types';
 import { LibraryPanel } from './library-panel';
-import { TransferPanel } from './transfer-panel';
+import { phaseLabels, TransferPanel } from './transfer-panel';
 import { Alert, AlertAction, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
@@ -139,10 +139,10 @@ export function Workspace({ userId }: { userId: string }) {
           <p className="text-sm text-muted-foreground">Match first. Review the results. Create a private playlist.</p>
         </div>
         {jobs.length ? <Select value={activeId} onValueChange={value => { if (value) void openJob(String(value)); }}
-          items={jobs.map(job => ({ value: job.id, label: `${job.name} · ${job.phase}` }))}>
+          items={jobs.map(job => ({ value: job.id, label: `${job.name} · ${phaseLabels[job.phase]}` }))}>
           <SelectTrigger aria-label="Transfer history" className="w-full sm:w-72"><SelectValue /></SelectTrigger>
           <SelectContent alignItemWithTrigger={false} className="w-auto max-w-[calc(100vw-2rem)]">
-            {jobs.map(job => <SelectItem key={job.id} value={job.id}>{job.name} · {job.phase}</SelectItem>)}
+            {jobs.map(job => <SelectItem key={job.id} value={job.id}><span className="truncate">{job.name}</span><span className="text-muted-foreground">{phaseLabels[job.phase]}</span></SelectItem>)}
           </SelectContent>
         </Select> : null}
       </div>
