@@ -160,7 +160,7 @@ function Workspace({ userId, onError, onSetup }: { userId: string; onError: (mes
 function Setup({ status }: { status: Status | null }) {
   const base = import.meta.env.VITE_APP_URL || 'https://your-domain.example';
   return <section className="setup-panel" aria-labelledby="setup-heading"><h2 id="setup-heading">Configure sign-in and provider access</h2>
-    <p>Set Worker secrets for Clerk, Spotify, Google, and token encryption. Set <code>VITE_CLERK_PUBLISHABLE_KEY</code> when building the app. Local development reads values from <code>.dev.vars</code>.</p>
+    <p>Set Worker secrets for Clerk, Spotify, Google, and token encryption. Set <code>VITE_CLERK_PUBLISHABLE_KEY</code> when building the app. Local development reads values from <code>.env.local</code>.</p>
     <div className="setup-columns"><div><h3>Clerk</h3><p>Set <code>CLERK_SECRET_KEY</code> and the public key. Clerk production sign-in needs a domain you control.</p></div><div><h3>Spotify</h3><p>Register this callback in your Spotify app:</p><code className="callback">{status?.callbacks.spotify || `${base}/auth/spotify/callback`}</code><p>Set <code>SPOTIFY_CLIENT_ID</code>.</p></div><div><h3>YouTube</h3><p>Enable YouTube Data API v3 and register this callback:</p><code className="callback">{status?.callbacks.youtube || `${base}/auth/youtube/callback`}</code><p>Set <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code>.</p></div><div><h3>Worker settings</h3><p>Configure <code>APP_URL</code>, <code>TOKEN_ENCRYPTION_KEY</code>, and the D1 binding. Never put secrets in browser storage.</p></div></div>
   </section>;
 }
@@ -213,7 +213,23 @@ function Library({ provider, status, onError, onSetup, onCreated, onDisconnect }
       <div className="library-tools"><label><span className="sr-only">Search {names[provider]} playlists</span><input type="search" placeholder="Find a playlist" value={filter} onChange={event => setFilter(event.target.value)} /></label><button className="text-button" disabled={loading} onClick={() => setReload(value => value + 1)}>{loading ? 'Loading…' : 'Refresh'}</button></div>
       {loadError ? <div role="alert" className="inline-error">{loadError} <button className="text-button" onClick={() => setReload(value => value + 1)}>Retry</button></div> : null}
       {!loading && !loadError && !filtered.length ? <p className="no-results">{playlists.length ? 'No playlists match your search.' : 'No playlists found in this account.'}</p> : null}
-      <ul className="playlist-list">{filtered.map(playlist => <li key={playlist.id}><div className="cover">{playlist.image ? <img src={playlist.image} alt="" loading="lazy" /> : <span aria-hidden="true">♫</span>}</div><div className="playlist-info"><a href={playlist.url} target="_blank" rel="noreferrer">{playlist.name}</a><p>{playlist.count.toLocaleString()} tracks{!playlist.transferable ? ' · Contents unavailable' : ''}</p></div><button className="transfer-button" disabled={!playlist.transferable || !status.accounts[destination] || busy} title={!status.accounts[destination] ? `Connect ${names[destination]} first` : `Transfer to ${names[destination]}`} onClick={() => { setChosen(playlist); setName(playlist.name); }}>Transfer <span aria-hidden="true">↗</span></button></li>)}</ul>
+      <ul className="playlist-list">{filtered.map(playlist => {
+        const disabledReason = !playlist.transferable
+          ? provider === 'spotify'
+            ? 'Spotify only shares tracks from playlists you own or collaborate on. Ask the owner to add you as a collaborator, or copy the songs into your own Spotify playlist.'
+            : 'This playlist’s tracks are unavailable for transfer.'
+          : !status.accounts[destination] ? `Connect ${names[destination]} to transfer this playlist.` : null;
+        const reasonId = `${provider}-playlist-${playlist.id}-reason`;
+        return <li key={playlist.id}>
+          <div className="cover">{playlist.image ? <img src={playlist.image} alt="" loading="lazy" /> : <span aria-hidden="true">♫</span>}</div>
+          <div className="playlist-info">
+            <a href={playlist.url} target="_blank" rel="noreferrer">{playlist.name}</a>
+            <p>{playlist.count.toLocaleString()} tracks</p>
+            {disabledReason ? <p id={reasonId}>{disabledReason}</p> : null}
+          </div>
+          <button className="transfer-button" disabled={Boolean(disabledReason) || busy} aria-describedby={disabledReason ? reasonId : undefined} title={disabledReason || `Transfer to ${names[destination]}`} onClick={() => { setChosen(playlist); setName(playlist.name); }}>Transfer <span aria-hidden="true">↗</span></button>
+        </li>;
+      })}</ul>
       {cursor ? <div className="load-more"><button className="secondary" disabled={moreBusy} onClick={() => void loadMore()}>{moreBusy ? 'Loading…' : 'Load more playlists'}</button></div> : null}
     </>}
     {chosen ? <form className="transfer-form" onSubmit={create}><h3>Copy to {names[destination]}</h3><label>New playlist name<input autoFocus value={name} onChange={event => setName(event.target.value)} required maxLength={150} /></label><p>We’ll find matches for review before anything is created.</p><div className="actions"><button type="button" className="text-button" disabled={busy} onClick={() => setChosen(null)}>Cancel</button><button className="primary" disabled={busy}>{busy ? 'Starting…' : 'Find matches'}</button></div></form> : null}

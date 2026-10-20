@@ -15,9 +15,9 @@ Clerk sign-in is separate from connecting Spotify/YouTube. The app never treats 
 ## Local development
 
 1. Install the supported Node.js version from `package.json`, then run `npm install`.
-2. Copy the committed environment examples: `.env.example` is for Vite's public build settings, and `.dev.vars.example` is for local Worker bindings/secrets. Keep real `.env` and `.dev.vars` files out of Git.
-3. Add Clerk's publishable key and local secret key. Generate a 32-byte base64 encryption key, for example with `openssl rand -base64 32`, and place it in `TOKEN_ENCRYPTION_KEY` in `.dev.vars`. Do not paste keys into chat.
-4. Set `APP_URL=http://127.0.0.1:5173` (or the exact local address/port configured by the app). Add Spotify and Google OAuth client settings to `.dev.vars`.
+2. Copy `.env.example` to `.env.local`. Vite and Cloudflare both load this file for local development. Only `VITE_` variables are exposed to the browser; keep server secrets unprefixed. Keep `.env.local` out of Git. Do not create `.dev.vars`, because it takes precedence and prevents Cloudflare from loading dotenv files.
+3. Add Clerk's publishable key and local secret key. Generate a 32-byte base64 encryption key, for example with `openssl rand -base64 32`, and place it in `TOKEN_ENCRYPTION_KEY` in `.env.local`. Do not paste keys into chat.
+4. Set `APP_URL=http://127.0.0.1:5173` (or the exact local address/port configured by the app). Add Spotify and Google OAuth client settings to `.env.local`.
 5. Apply the committed migration to the local D1 binding:
 
    ```sh

@@ -10,8 +10,7 @@ Requires Node.js 24+, a Clerk app, a Spotify Premium account, and your own Spoti
 
 ```sh
 npm install
-cp .env.example .env
-cp .dev.vars.example .dev.vars
+cp .env.example .env.local
 # Configure Clerk/provider keys and a persistent encryption secret.
 npx wrangler d1 migrations apply DB --local
 npm run dev

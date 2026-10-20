@@ -13,7 +13,7 @@ const configs = {
 } as const;
 
 export class ServiceError extends Error {
-  constructor(message: string, public status = 400) { super(message); this.name = 'ServiceError'; }
+  constructor(message: string, public status = 400, public reason?: string) { super(message); this.name = 'ServiceError'; }
 }
 function constantTimeEqual(left: string, right: string): boolean {
   const a = new TextEncoder().encode(left); const b = new TextEncoder().encode(right);
@@ -55,7 +55,7 @@ async function readResponse(response: Response): Promise<Json> {
     if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded') throw new ServiceError('YouTube daily quota reached. Progress is saved. Resume after the quota resets at midnight Pacific time.', 429);
     if (response.status === 429) throw new ServiceError(`Rate limit reached. Progress is saved. Retry after ${response.headers.get('retry-after') || 'a few'} seconds.`, 429);
     if (response.status === 401 || body.error === 'invalid_grant') throw new ServiceError('Account authorization expired. Reconnect the account, then resume your transfer.', 401);
-    throw new ServiceError(typeof error.message === 'string' ? error.message : `The music service returned HTTP ${response.status}.`, response.status);
+    throw new ServiceError(typeof error.message === 'string' ? error.message : `The music service returned HTTP ${response.status}.`, response.status, reason);
   }
   return body;
 }
@@ -191,7 +191,17 @@ export class Providers {
       if (cursor) query.set('pageToken', cursor);
       path = `playlistItems?${query}`;
     }
-    const body = await this.api(provider, path);
+    let body: Json;
+    for (let attempt = 0; ; attempt++) {
+      try { body = await this.api(provider, path); break; }
+      catch (error) {
+        // A newly created YouTube playlist can briefly be unavailable to playlistItems.list.
+        // Retry only this read; never replay a potentially successful provider write.
+        if (provider !== 'youtube' || !(error instanceof ServiceError)
+          || error.status !== 404 || error.reason !== 'playlistNotFound' || attempt >= 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, [250, 750][attempt]));
+      }
+    }
     const raw = Array.isArray(body.items) ? body.items : [];
     const items = raw.map((entry) => {
       const item = record(entry);
