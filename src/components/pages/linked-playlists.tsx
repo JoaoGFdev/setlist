@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { ArrowRightIcon, Link2Icon, SearchIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { JobSummary, Provider } from '../../../shared/types';
-import { Cover, Direction, JobStatusBadge, RelativeDate, TrackCounts, sourceName, viewTransferHref } from '@/components/pages/job-display';
+import { Cover, Direction, JobStatusBadge, RelativeDate, TrackCounts, sourceName } from '@/components/pages/job-display';
 import { RetryAlert } from '@/components/pages/retry-alert';
 import { Button } from '@/components/ui/button';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
@@ -64,7 +64,7 @@ function LinkedRow({ group }: { group: LinkedPlaylist }) {
     </div>
     <ItemActions className="ml-auto">
       <RelativeDate value={job.updatedAt} className="text-xs text-muted-foreground" />
-      <Button variant="outline" size="sm" nativeButton={false} render={<a href={viewTransferHref(job.id)} />}>View transfer</Button>
+      <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/" search={{ job: job.id }} />}>View transfer</Button>
     </ItemActions>
   </Item>;
 }

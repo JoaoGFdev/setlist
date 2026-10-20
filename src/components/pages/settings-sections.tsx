@@ -1,9 +1,11 @@
 import { Link } from '@tanstack/react-router';
 import { EyeIcon, EyeOffIcon, MonitorIcon, MoonIcon, SunIcon, Trash2Icon, UnplugIcon } from 'lucide-react';
 import { useTheme } from 'next-themes';
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import type { HiddenPlaylist, Preferences, Provider, Status } from '../../../shared/types';
+import { useDataActions } from '@/hooks/use-data-actions';
+import { useResource } from '@/hooks/use-resource';
 import { ClearHistoryDialog } from '@/components/pages/clear-history-dialog';
 import { ConfirmDialog } from '@/components/pages/confirm-dialog';
 import { Cover, RelativeDate } from '@/components/pages/job-display';
@@ -16,17 +18,15 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from '@/components/ui/item';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { api, getPreferences, providerNames, providers, setPlaylistHidden, type ApiError } from '@/lib/api';
+import { providerNames, providers } from '@/lib/api';
 
 export function ConnectedAccounts() {
-  const [status, setStatus] = useState<Status | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { disconnect } = useDataActions();
+  const query = useResource<Status>('/status');
+  const status = query.data;
+  const error = query.error?.message;
+  const load = () => { void query.refetch(); };
   const [disconnecting, setDisconnecting] = useState<Provider | null>(null);
-  const load = useCallback(() => {
-    setError(null);
-    api<Status>('/status').then(setStatus).catch((cause: Error) => setError(cause.message));
-  }, []);
-  useEffect(load, [load]);
 
   return <Card>
     <CardHeader>
@@ -61,9 +61,8 @@ export function ConnectedAccounts() {
       description="Setlist will forget this account's saved credentials and also delete your saved transfer history. Playlists on Spotify and YouTube are not changed."
       onConfirm={async () => {
         if (!disconnecting) return;
-        await api(`/accounts/${disconnecting}/disconnect`, {});
+        await disconnect(disconnecting);
         toast.success(`${providerNames[disconnecting]} disconnected`);
-        load();
       }} />
   </Card>;
 }
@@ -71,27 +70,21 @@ export function ConnectedAccounts() {
 const hiddenKey = (playlist: Pick<HiddenPlaylist, 'provider' | 'id'>) => `${playlist.provider}:${playlist.id}`;
 
 export function HiddenPlaylists() {
-  const [hidden, setHidden] = useState<HiddenPlaylist[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { setPlaylistHidden } = useDataActions();
+  const query = useResource<Preferences>('/preferences');
+  const hidden = query.data?.hiddenPlaylists ?? (query.error && 'status' in query.error && query.error.status === 404 ? [] : null);
+  const error = hidden ? null : query.error?.message;
+  const load = () => { void query.refetch(); };
   const [busy, setBusy] = useState<string | null>(null);
-  const load = useCallback(() => {
-    setError(null);
-    getPreferences()
-      .then((preferences: Preferences) => setHidden(preferences.hiddenPlaylists))
-      .catch((cause: ApiError) => { if (cause.status === 404) setHidden([]); else setError(cause.message); });
-  }, []);
-  useEffect(load, [load]);
 
   async function show(playlists: HiddenPlaylist[], label: string) {
     setBusy(playlists.length === 1 ? hiddenKey(playlists[0]) : 'all');
-    const restored = new Set<string>();
     try {
-      for (const playlist of playlists) { await setPlaylistHidden(playlist, false); restored.add(hiddenKey(playlist)); }
+      for (const playlist of playlists) { await setPlaylistHidden(playlist, false); }
       toast.success(`${label} will show in the workspace again`);
     } catch (cause) {
       toast.error((cause as Error).message);
     } finally {
-      setHidden(current => current && current.filter(playlist => !restored.has(hiddenKey(playlist))));
       setBusy(null);
     }
   }

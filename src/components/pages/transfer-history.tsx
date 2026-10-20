@@ -3,9 +3,10 @@ import { ExternalLinkIcon, EyeIcon, HistoryIcon, MoreHorizontalIcon, Trash2Icon 
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import type { JobSummary } from '../../../shared/types';
+import { useDataActions } from '@/hooks/use-data-actions';
 import { ClearHistoryDialog } from '@/components/pages/clear-history-dialog';
 import { ConfirmDialog } from '@/components/pages/confirm-dialog';
-import { Cover, Direction, JobStatusBadge, RelativeDate, TrackCounts, jobStage, sourceName, stageLabels, viewTransferHref, type JobStage } from '@/components/pages/job-display';
+import { Cover, Direction, JobStatusBadge, RelativeDate, TrackCounts, jobStage, sourceName, stageLabels, type JobStage } from '@/components/pages/job-display';
 import { PageHeader } from '@/components/page-header';
 import { RetryAlert } from '@/components/pages/retry-alert';
 import { Button } from '@/components/ui/button';
@@ -15,7 +16,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useJobs } from '@/hooks/use-jobs';
-import { deleteJob } from '@/lib/api';
 
 export const historyTitle = 'Transfer history';
 export const historyDescription = 'Every playlist transfer saved in Setlist, newest first.';
@@ -34,7 +34,7 @@ function RowActions({ job, onRemove }: { job: JobSummary; onRemove: (job: JobSum
     <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${job.name}`} />}><MoreHorizontalIcon /></DropdownMenuTrigger>
     <DropdownMenuContent align="end" className="w-52">
       <DropdownMenuGroup>
-        <DropdownMenuItem render={<a href={viewTransferHref(job.id)} />}><EyeIcon />View transfer</DropdownMenuItem>
+        <DropdownMenuItem render={<Link to="/" search={{ job: job.id }} />}><EyeIcon />View transfer</DropdownMenuItem>
         {job.destinationUrl ? <DropdownMenuItem render={<a href={job.destinationUrl} target="_blank" rel="noreferrer" />}><ExternalLinkIcon />Open destination playlist</DropdownMenuItem> : null}
       </DropdownMenuGroup>
       <DropdownMenuSeparator />
@@ -64,7 +64,7 @@ function HistoryTable({ jobs, onRemove }: { jobs: JobSummary[]; onRemove: (job: 
             <div className="flex items-center gap-3">
               <Cover src={job.sourcePlaylistImage} className="hidden size-9 sm:flex" />
               <div className="flex min-w-0 flex-col">
-                <a href={viewTransferHref(job.id)} className="truncate font-medium underline-offset-4 hover:underline">{job.name}</a>
+                <Link to="/" search={{ job: job.id }} className="truncate font-medium underline-offset-4 hover:underline">{job.name}</Link>
                 <span className="truncate text-xs text-muted-foreground">{sourceName(job)}</span>
               </div>
             </div>
@@ -81,6 +81,7 @@ function HistoryTable({ jobs, onRemove }: { jobs: JobSummary[]; onRemove: (job: 
 }
 
 export function TransferHistory() {
+  const { deleteJob } = useDataActions();
   const { jobs, loading, error, refresh, removeLocal } = useJobs();
   const [tab, setTab] = useState<Tab>('all');
   const [pending, setPending] = useState<JobSummary | null>(null);

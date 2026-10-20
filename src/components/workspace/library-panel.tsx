@@ -1,6 +1,9 @@
 import { useReverification, useUser } from '@clerk/tanstack-react-start';
 import { MusicIcon, RefreshCwIcon, SearchIcon } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
+import { useDataActions } from '@/hooks/use-data-actions';
+import { userKey } from '@/lib/query-client';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import type { FullJob, JobSummary, Playlist, Provider, Status } from '../../../shared/types';
 import { providerScopes } from '../../../shared/provider-scopes';
@@ -31,16 +34,18 @@ function PlaylistSkeletons() {
   </div>;
 }
 
-export function LibraryPanel({ provider, status, jobs, hiddenIds, onToggleHidden, onCreated, onDisconnect, onOpenJob }: {
+export function LibraryPanel({ userId, provider, status, jobs, hiddenIds, onToggleHidden, onCreated, onConnected, onOpenJob }: {
+  userId: string;
   provider: Provider;
   status: Status;
   jobs: JobSummary[];
   hiddenIds: ReadonlySet<string>;
   onToggleHidden: (playlist: Playlist, provider: Provider, hidden: boolean) => void;
   onCreated: (job: FullJob) => void;
-  onDisconnect: () => void;
+  onConnected: () => void;
   onOpenJob: (id: string) => void;
 }) {
+  const { disconnect: disconnectAccount } = useDataActions();
   const { user } = useUser();
   const clerkProvider = provider === 'youtube' ? 'google' : 'spotify';
   const authorize = useReverification(async () => {
@@ -51,37 +56,32 @@ export function LibraryPanel({ provider, status, jobs, hiddenIds, onToggleHidden
   });
   const account = status.accounts[provider];
   const destination = otherProvider(provider);
-  const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [cursor, setCursor] = useState<string | undefined>();
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
+  const queryKey = [...userKey(userId), 'playlists', provider, account?.id];
+  const library = useInfiniteQuery({
+    queryKey,
+    enabled: Boolean(account),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => playlistPage(`/playlists/${provider}${pageParam ? `?cursor=${encodeURIComponent(pageParam)}` : ''}`),
+    getNextPageParam: page => page.nextCursor,
+  });
+  const playlists = library.data?.pages.flatMap(page => page.items) ?? [];
+  const cursor = library.hasNextPage;
+  const loading = library.isFetching && !library.isFetchingNextPage;
+  const loadError = library.error?.message;
+  const moreBusy = library.isFetchingNextPage;
+  const refresh = () => { void library.refetch(); };
   const [filter, setFilter] = useState('');
   const [showHidden, setShowHidden] = useState(false);
   const [chosen, setChosen] = useState<Playlist | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [moreBusy, setMoreBusy] = useState(false);
-
-  useEffect(() => {
-    if (!account) { setPlaylists([]); setCursor(undefined); return; }
-    let live = true;
-    setLoading(true); setLoadError(null); setPlaylists([]); setCursor(undefined);
-    playlistPage(`/playlists/${provider}`).then(page => { if (live) { setPlaylists(page.items); setCursor(page.nextCursor); } }).catch(cause => { if (live) setLoadError((cause as Error).message); }).finally(() => { if (live) setLoading(false); });
-    return () => { live = false; };
-  }, [account?.id, provider, reload]);
-
   async function loadMore() {
-    if (!cursor || moreBusy) return;
-    setMoreBusy(true);
-    try { const page = await playlistPage(`/playlists/${provider}?cursor=${encodeURIComponent(cursor)}`); setPlaylists(current => [...current, ...page.items]); setCursor(page.nextCursor); }
-    catch (cause) { setLoadError((cause as Error).message); }
-    finally { setMoreBusy(false); }
+    if (cursor && !moreBusy) await library.fetchNextPage();
   }
   async function disconnect() {
     setConfirmDisconnect(false);
     setBusy(true);
-    try { await api(`/accounts/${provider}/disconnect`, {}); onDisconnect(); }
+    try { await disconnectAccount(provider); }
     catch (cause) { toast.error((cause as Error).message); }
     finally { setBusy(false); }
   }
@@ -92,7 +92,7 @@ export function LibraryPanel({ provider, status, jobs, hiddenIds, onToggleHidden
       const external = await authorize();
       const redirect = external?.verification?.externalVerificationRedirectURL;
       if (redirect) { window.location.assign(redirect.href); return; }
-      if (external) { await user?.reload(); onDisconnect(); }
+      if (external) { await user?.reload(); onConnected(); }
     } catch (cause) { toast.error((cause as Error).message); }
     finally { setBusy(false); }
   }
@@ -165,7 +165,7 @@ export function LibraryPanel({ provider, status, jobs, hiddenIds, onToggleHidden
               <InputGroupAddon><SearchIcon /></InputGroupAddon>
               <InputGroupInput type="search" aria-label={`Search ${providerNames[provider]} playlists`} placeholder="Find a playlist" value={filter} onChange={event => setFilter(event.target.value)} />
             </InputGroup>
-            <Button variant="outline" disabled={loading} onClick={() => setReload(value => value + 1)}>
+            <Button variant="outline" disabled={loading} onClick={() => refresh()}>
               {loading ? <Spinner data-icon="inline-start" /> : <RefreshCwIcon data-icon="inline-start" />}{loading ? 'Loading…' : 'Refresh'}
             </Button>
           </div>
@@ -175,7 +175,7 @@ export function LibraryPanel({ provider, status, jobs, hiddenIds, onToggleHidden
           </Field> : null}
           {loadError ? <Alert variant="destructive">
             <AlertDescription>{loadError}</AlertDescription>
-            <AlertAction><Button variant="outline" size="xs" onClick={() => setReload(value => value + 1)}>Retry</Button></AlertAction>
+            <AlertAction><Button variant="outline" size="xs" onClick={() => refresh()}>Retry</Button></AlertAction>
           </Alert> : null}
           {loading && !playlists.length ? <PlaylistSkeletons /> : null}
           {!loading && !loadError && !visible.length ? <Empty className="border py-8"><EmptyHeader><EmptyDescription>{emptyMessage()}</EmptyDescription></EmptyHeader></Empty> : null}

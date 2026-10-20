@@ -1,26 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
 import type { JobSummary } from '../../shared/types';
-import { api } from '@/lib/api';
+import { useResource } from './use-resource';
 
-/** Loads the saved transfers (newest first) and exposes loading, error and reload state. */
+/** Shared with the workspace and linked playlists; navigation reuses the same data. */
 export function useJobs() {
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [version, setVersion] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    api<JobSummary[]>('/jobs')
-      .then(result => { if (!cancelled) setJobs(result); })
-      .catch((cause: Error) => { if (!cancelled) setError(cause.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [version]);
-
-  const refresh = useCallback(() => setVersion(value => value + 1), []);
-  const removeLocal = useCallback((ids: string[] | 'all') => setJobs(current => ids === 'all' ? [] : current.filter(job => !ids.includes(job.id))), []);
-  return { jobs, loading, error, refresh, removeLocal };
+  const query = useResource<JobSummary[]>('/jobs');
+  const removeLocal = (ids: string[] | 'all') => query.setData(current => ids === 'all' ? [] : (current ?? []).filter(job => !ids.includes(job.id)));
+  return { jobs: query.data ?? [], loading: query.isPending, error: query.error?.message ?? null, refresh: () => { void query.refetch(); }, removeLocal };
 }
