@@ -269,3 +269,38 @@ test('OAuth callback binding rejects replay, a different user, provider, cookie,
   assert.equal(validOAuthBinding(pending, 'spotify', 'other-cookie', 'user-a', 1_999), false);
   assert.equal(validOAuthBinding(undefined, 'spotify', 'cookie-secret', 'user-a', 1_999), false);
 });
+
+
+test('destination reads recover when YouTube briefly cannot find a newly created playlist', async () => {
+  const { providers } = setup();
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_input, init) => {
+    assert.equal(init?.method || 'GET', 'GET');
+    calls++;
+    return calls === 1
+      ? Response.json({ error: { message: "The playlist identified with the request's <code>playlistId</code> parameter cannot be found.", errors: [{ reason: 'playlistNotFound' }] } }, { status: 404 })
+      : Response.json({ items: [] });
+  };
+  try {
+    assert.deepEqual(await providers.destinationPage('youtube', 'new-playlist'), { items: [], nextCursor: undefined });
+    assert.equal(calls, 2);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test('YouTube destination retries are bounded and do not retry unrelated errors', async () => {
+  const { providers } = setup();
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [status, reason, expectedCalls] of [[404, 'playlistNotFound', 3], [403, 'forbidden', 1], [404, 'otherNotFound', 1]] as const) {
+      let calls = 0;
+      globalThis.fetch = async () => {
+        calls++;
+        return Response.json({ error: { message: 'Unavailable', errors: [{ reason }] } }, { status });
+      };
+      await assert.rejects(providers.destinationPage('youtube', 'destination'), (error: unknown) => error instanceof ServiceError && error.status === status && error.reason === reason);
+      assert.equal(calls, expectedCalls);
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});
