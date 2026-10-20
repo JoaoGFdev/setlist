@@ -2,6 +2,10 @@
 
 For Cloudflare Workers Builds, set `PNPM_VERSION=12.14.0` under **Settings > Build > Build Variables and Secrets** so dependency installation matches local development. Keep this value aligned with `packageManager` in `package.json`.
 
+In that same build settings section, set `VITE_CLERK_PUBLISHABLE_KEY` to the production Clerk publishable key. Vite embeds this public value during `pnpm build`; adding it only under the Worker's runtime **Variables & Secrets** does not configure the browser bundle. Keep `CLERK_SECRET_KEY` in Worker secrets and `CLERK_PUBLISHABLE_KEY` in the Worker runtime configuration.
+
+After changing build variables, trigger a fresh build and deployment from `main`. Redeploying an existing artifact preserves its old embedded values. If the site displays “Sign-in unavailable”, confirm the build received `VITE_CLERK_PUBLISHABLE_KEY` before investigating Clerk sign-in or provider connections.
+
 Target: one TanStack Start Worker, static assets, one D1 database accessed with Drizzle, and Clerk authentication. No paid queue, VM, external database, or transfer subscription is required. This guide prepares your own Cloudflare/Clerk/provider accounts; creating the source code does not create those resources or connect your accounts automatically.
 
 The owner has a domain and will supply it later. Replace the example hostname throughout with that domain; never register the literal example callbacks. A stable domain keeps Clerk and provider redirects consistent across deployments.
