@@ -75,6 +75,22 @@ describe('authenticated workspace UI', () => {
     expect(fetchMock.mock.calls.some(([input]) => requestPath(input) === '/api/accounts/spotify/connect')).toBe(true);
   });
 
+  it('still offers each provider\'s Connect button when account status cannot load', async () => {
+    authState.userId = 'clerk-user-1';
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const path = requestPath(input);
+      if (path === '/api/status') return json({ error: 'Sign in to use your transfer workspace.' }, 401);
+      if (path === '/api/jobs') return json({ error: 'Sign in to use your transfer workspace.' }, 401);
+      throw new Error(`Unexpected request: ${path}`);
+    }));
+    render(<App />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Sign in to use your transfer workspace.');
+    for (const name of ['Spotify library', 'YouTube library']) {
+      const library = await screen.findByRole('region', { name });
+      expect(within(library).getByRole('button', { name: 'Allow playlist access' })).toBeTruthy();
+    }
+  });
+
   it('does not read private APIs while signed out, then loads the workspace after sign-in', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = requestPath(input);

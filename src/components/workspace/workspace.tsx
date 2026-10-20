@@ -1,3 +1,4 @@
+import { useAuth } from '@clerk/tanstack-react-start';
 import { ArrowLeftRightIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -9,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api, getPreferences, providerNames, providers, setPlaylistHidden } from '@/lib/api';
+import { api, type ApiError, getPreferences, providerNames, providers, setPlaylistHidden } from '@/lib/api';
 
 function WorkspaceSkeleton() {
   return <div role="status" aria-label="Loading your workspace" className="grid items-start gap-6 lg:grid-cols-2">
@@ -17,7 +18,16 @@ function WorkspaceSkeleton() {
   </div>;
 }
 
+/** Shown when the account status cannot load, so each library still offers its Connect button. */
+const disconnectedStatus: Status = {
+  accounts: { spotify: null, youtube: null },
+  connectionErrors: { spotify: null, youtube: null },
+  configured: { spotify: true, youtube: true },
+  callbacks: { spotify: '', youtube: '' },
+};
+
 export function Workspace({ userId }: { userId: string }) {
+  const { getToken } = useAuth();
   const [status, setStatus] = useState<Status | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -35,13 +45,25 @@ export function Workspace({ userId }: { userId: string }) {
     setStatus(null); setJobs([]); setActiveId(null); setActiveJob(null); setLoadError(null);
     if (!userId) return;
     let live = true;
-    Promise.all([api<Status>('/status'), api<JobSummary[]>('/jobs')]).then(async ([nextStatus, nextJobs]) => {
+    // The session cookie can lag behind Clerk's client state right after sign-in, so a 401 refreshes the token and retries once.
+    const load = async <T,>(path: string): Promise<T> => {
+      try { return await api<T>(path); }
+      catch (cause) {
+        if ((cause as ApiError).status !== 401 || !getToken) throw cause;
+        await getToken({ skipCache: true });
+        return api<T>(path);
+      }
+    };
+    Promise.all([
+      load<Status>('/status').catch((cause: unknown) => { if (live) setLoadError((cause as Error).message); return disconnectedStatus; }),
+      load<JobSummary[]>('/jobs').catch(() => [] as JobSummary[]),
+    ]).then(async ([nextStatus, nextJobs]) => {
       const first = nextJobs.find(job => job.id === deepLink.current) ?? nextJobs[0];
-      const full = first ? await api<FullJob>(`/jobs/${first.id}`) : null;
+      const full = first ? await api<FullJob>(`/jobs/${first.id}`).catch(() => null) : null;
       if (!live) return;
       deepLink.current = null;
       setStatus(nextStatus); setJobs(nextJobs); setActiveId(first?.id ?? null); setActiveJob(full);
-    }).catch((cause: unknown) => { if (live) setLoadError((cause as Error).message); });
+    });
     return () => { live = false; };
   }, [userId, refresh]);
 
@@ -119,12 +141,12 @@ export function Workspace({ userId }: { userId: string }) {
     else { setActiveId(null); setActiveJob(null); }
   }
 
-  if (loadError) return <Alert variant="destructive">
-    <AlertDescription>{loadError} Check your connection, then try again.</AlertDescription>
-    <AlertAction><Button variant="outline" size="xs" onClick={() => setRefresh(value => value + 1)}>Retry</Button></AlertAction>
-  </Alert>;
   if (!status) return <WorkspaceSkeleton />;
   return <>
+    {loadError ? <Alert variant="destructive">
+      <AlertDescription>We couldn’t check your connected accounts: {loadError} Connect them below or try again.</AlertDescription>
+      <AlertAction><Button variant="outline" size="xs" onClick={() => setRefresh(value => value + 1)}>Retry</Button></AlertAction>
+    </Alert> : null}
     <div className="grid items-start gap-6 lg:grid-cols-2">
       {providers.map(provider => <LibraryPanel key={provider} provider={provider} status={status} jobs={jobs} hiddenIds={hiddenIds[provider]}
         onToggleHidden={(playlist, owner, hidden) => void toggleHidden(playlist, owner, hidden)}
