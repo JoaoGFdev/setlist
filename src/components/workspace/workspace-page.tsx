@@ -45,5 +45,5 @@ function AuthSession() {
     </EmptyHeader>
     <EmptyContent><SignInButton mode="modal"><Button variant="brand">Sign in to continue</Button></SignInButton></EmptyContent>
   </Empty>;
-  return <Workspace userId={userId} />;
+  return <Workspace key={userId} userId={userId} />;
 }

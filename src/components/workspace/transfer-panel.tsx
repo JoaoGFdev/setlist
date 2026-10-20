@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import type { FullJob, JobPhase, Provider } from '../../../shared/types';
 import { MatchRow } from './match-row';
+import { useDataActions } from '@/hooks/use-data-actions';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +13,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ItemGroup } from '@/components/ui/item';
 import { Progress } from '@/components/ui/progress';
 import { Spinner } from '@/components/ui/spinner';
-import { api, deleteJob, providerNames } from '@/lib/api';
+import { api, providerNames } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const PAGE_SIZE = 25;
@@ -31,6 +32,7 @@ export function TransferPanel({ job, armed, onStart, onUpdate, onDeleted }: {
   onUpdate: (job: FullJob) => void;
   onDeleted: (id: string) => void;
 }) {
+  const { deleteJob } = useDataActions();
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<number | null>(null);

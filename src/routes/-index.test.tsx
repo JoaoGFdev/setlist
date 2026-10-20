@@ -25,6 +25,9 @@ vi.mock('@tanstack/react-router', () => ({
 const toastMock = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock, Toaster: () => null }));
 
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@/lib/query-client';
+import { HistoryPage } from '@/components/pages/history-page';
 import { App } from '@/components/workspace/workspace-page';
 
 const status = {
@@ -53,9 +56,37 @@ function json(value: unknown, statusCode = 200) {
 const requestPath = (input: RequestInfo | URL) => String(input);
 const method = (init?: RequestInit) => init?.method || 'GET';
 
+let queryClient = createQueryClient();
+const renderApp = () => render(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>);
+
 describe('authenticated workspace UI', () => {
-  beforeEach(() => { authState.userId = null; clerkAuthorize.mockClear(); toastMock.success.mockClear(); toastMock.error.mockClear(); });
+  beforeEach(() => { queryClient = createQueryClient(); authState.userId = null; clerkAuthorize.mockClear(); toastMock.success.mockClear(); toastMock.error.mockClear(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, '', '/'); });
+
+  it('reuses workspace, transfer and playlist data after leaving and returning', async () => {
+    authState.userId = 'clerk-user-1';
+    const job = fullJob('job-1');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = requestPath(input);
+      if (path === '/api/status') return json(status);
+      if (path === '/api/jobs') return json([summary(job)]);
+      if (path === '/api/jobs/job-1') return json(job);
+      if (path === '/api/preferences') return json({ hiddenPlaylists: [] });
+      if (path.startsWith('/api/playlists/')) return json({ items: [playlist] });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const view = renderApp();
+    await screen.findByRole('heading', { name: 'Night drive' });
+    await within(screen.getByRole('region', { name: 'Spotify library' })).findByText('Night drive');
+    const requests = fetchMock.mock.calls.length;
+    view.rerender(<QueryClientProvider client={queryClient}><HistoryPage /></QueryClientProvider>);
+    await screen.findByRole('tab', { name: 'All 1' });
+    view.rerender(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>);
+    await screen.findByRole('heading', { name: 'Night drive' });
+    await within(screen.getByRole('region', { name: 'Spotify library' })).findByText('Night drive');
+    expect(fetchMock).toHaveBeenCalledTimes(requests);
+  });
 
   it('requests playlist consent through an already linked Clerk account', async () => {
     authState.userId = 'clerk-user-1';
@@ -67,7 +98,7 @@ describe('authenticated workspace UI', () => {
       throw new Error(`Unexpected request: ${path}`);
     });
     vi.stubGlobal('fetch', fetchMock);
-    render(<App />);
+    renderApp();
     const spotify = await screen.findByRole('region', { name: 'Spotify library' });
     await userEvent.setup().click(within(spotify).getByRole('button', { name: 'Connect' }));
     await waitFor(() => expect(clerkAuthorize).toHaveBeenCalledOnce());
@@ -83,7 +114,7 @@ describe('authenticated workspace UI', () => {
       if (path === '/api/jobs') return json({ error: 'Sign in to use your transfer workspace.' }, 401);
       throw new Error(`Unexpected request: ${path}`);
     }));
-    render(<App />);
+    renderApp();
     expect((await screen.findByRole('alert')).textContent).toContain('Sign in to use your transfer workspace.');
     for (const name of ['Spotify library', 'YouTube library']) {
       const library = await screen.findByRole('region', { name });
@@ -101,12 +132,12 @@ describe('authenticated workspace UI', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
-    const view = render(<App />);
+    const view = renderApp();
     await screen.findByText('Sign in to your private workspace');
     expect(fetchMock).not.toHaveBeenCalled();
 
     authState.userId = 'clerk-user-1';
-    view.rerender(<App />);
+    view.rerender(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>);
     expect(await screen.findByText('Spotify listener')).toBeTruthy();
     await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => requestPath(input) === '/api/status')).toBe(true));
     expect(fetchMock.mock.calls.filter(([input]) => requestPath(input).startsWith('/api/playlists/'))).toHaveLength(2);
@@ -132,7 +163,7 @@ describe('authenticated workspace UI', () => {
     vi.stubGlobal('fetch', fetchMock);
     authState.userId = 'clerk-user-1';
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
     await screen.findAllByText('Night drive');
     await user.click(within(screen.getByRole('region', { name: 'Spotify library' })).getByRole('button', { name: /transfer/i }));
     await user.click(screen.getByRole('button', { name: 'Find matches' }));
@@ -161,7 +192,7 @@ describe('authenticated workspace UI', () => {
     vi.stubGlobal('fetch', fetchMock);
     authState.userId = 'clerk-user-1';
     const user = userEvent.setup();
-    render(<App />);
+    renderApp();
     await screen.findByRole('heading', { name: 'Night drive' });
     await user.click(screen.getByRole('button', { name: 'Continue transfer' }));
     await waitFor(() => expect(stepCount).toBe(1));
@@ -193,12 +224,51 @@ describe('authenticated workspace UI', () => {
       });
     }
 
+    it('retains loaded playlist pages and refreshes only the chosen library', async () => {
+      authState.userId = 'clerk-user-1';
+      const base = libraryMock();
+      const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (requestPath(input) === '/api/playlists/spotify') return json({ items: [playlist], nextCursor: 'page2' });
+        if (requestPath(input) === '/api/playlists/spotify?cursor=page2') return json({ items: [second] });
+        return base(input, init);
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      const user = userEvent.setup();
+      const view = renderApp();
+      const spotify = await screen.findByRole('region', { name: 'Spotify library' });
+      await within(spotify).findByText('Night drive');
+      await user.click(within(spotify).getByRole('button', { name: 'Load more playlists' }));
+      await within(spotify).findByText('Morning run');
+      const count = fetchMock.mock.calls.length;
+      view.unmount();
+      renderApp();
+      const restored = await screen.findByRole('region', { name: 'Spotify library' });
+      await within(restored).findByText('Morning run');
+      expect(fetchMock).toHaveBeenCalledTimes(count);
+      await user.click(within(restored).getByRole('button', { name: 'Refresh' }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(count + 2));
+      expect(fetchMock.mock.calls.slice(count).map(([input]) => requestPath(input))).toEqual(['/api/playlists/spotify', '/api/playlists/spotify?cursor=page2']);
+    });
+
+    it('loads a separate cache when the signed-in user changes', async () => {
+      authState.userId = 'clerk-user-1';
+      const fetchMock = libraryMock();
+      vi.stubGlobal('fetch', fetchMock);
+      const view = renderApp();
+      await within(await screen.findByRole('region', { name: 'Spotify library' })).findByText('Night drive');
+      authState.userId = 'clerk-user-2';
+      view.rerender(<QueryClientProvider client={queryClient}><App /></QueryClientProvider>);
+      await within(await screen.findByRole('region', { name: 'Spotify library' })).findByText('Night drive');
+      expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/status')).toHaveLength(2);
+      expect(fetchMock.mock.calls.filter(([input]) => requestPath(input) === '/api/playlists/spotify')).toHaveLength(2);
+    });
+
     it('hides a playlist, offers undo, and reveals it again with Show hidden', async () => {
       const fetchMock = libraryMock();
       vi.stubGlobal('fetch', fetchMock);
       authState.userId = 'clerk-user-1';
       const user = userEvent.setup();
-      render(<App />);
+      renderApp();
       const spotify = await screen.findByRole('region', { name: 'Spotify library' });
       await within(spotify).findByText('Night drive');
       await user.click(within(spotify).getByRole('button', { name: 'More actions for Night drive' }));
@@ -231,7 +301,7 @@ describe('authenticated workspace UI', () => {
       });
       vi.stubGlobal('fetch', fetchMock);
       authState.userId = 'clerk-user-1';
-      render(<App />);
+      renderApp();
       const spotify = await screen.findByRole('region', { name: 'Spotify library' });
       expect(await within(spotify).findByText('Night drive')).toBeTruthy();
       expect(within(spotify).queryByRole('switch')).toBeNull();
@@ -244,7 +314,7 @@ describe('authenticated workspace UI', () => {
       vi.stubGlobal('fetch', libraryMock({ jobs: [summary(jobOne), summary(jobTwo)], spotify: [playlist, second], youtube: [created], fullJobs: { 'job-1': jobOne, 'job-2': jobTwo } }));
       authState.userId = 'clerk-user-1';
       const user = userEvent.setup();
-      render(<App />);
+      renderApp();
       await screen.findByRole('heading', { name: 'Night drive' });
       const spotify = screen.getByRole('region', { name: 'Spotify library' });
       const badge = await within(spotify).findByRole('button', { name: /Linked → YouTube/ });
@@ -258,7 +328,7 @@ describe('authenticated workspace UI', () => {
       const job = fullJob('job-1');
       vi.stubGlobal('fetch', libraryMock({ jobs: [summary(job)], fullJobs: { 'job-1': job } }));
       authState.userId = 'clerk-user-1';
-      render(<App />);
+      renderApp();
       const spotify = await screen.findByRole('region', { name: 'Spotify library' });
       expect(await within(spotify).findByRole('button', { name: /In progress/ })).toBeTruthy();
     });
@@ -272,7 +342,7 @@ describe('authenticated workspace UI', () => {
       vi.stubGlobal('fetch', fetchMock);
       authState.userId = 'clerk-user-1';
       const user = userEvent.setup();
-      render(<App />);
+      renderApp();
       await screen.findByRole('heading', { name: 'Night drive' });
       await user.click(screen.getByRole('button', { name: 'Transfer actions' }));
       await user.click(await screen.findByRole('menuitem', { name: 'Remove from history' }));
@@ -288,7 +358,7 @@ describe('authenticated workspace UI', () => {
       vi.stubGlobal('fetch', libraryMock({ jobs: [summary(jobOne), summary(jobTwo)], fullJobs: { 'job-1': jobOne, 'job-2': jobTwo } }));
       window.history.replaceState(null, '', '/?job=job-2');
       authState.userId = 'clerk-user-1';
-      render(<App />);
+      renderApp();
       expect(await screen.findByRole('heading', { name: 'Saved transfer' })).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Night drive' })).toBeNull();
     });
