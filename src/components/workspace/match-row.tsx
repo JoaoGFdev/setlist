@@ -1,36 +1,77 @@
-import { ArrowRightIcon, ArrowUpRightIcon, SearchIcon } from 'lucide-react';
+import { ArrowRightIcon, ArrowUpRightIcon, CheckIcon, ChevronDownIcon, MusicIcon, SearchIcon } from 'lucide-react';
 import { useState } from 'react';
-import type { JobItem } from '../../../shared/types';
+import type { Candidate, JobItem, Provider, Track } from '../../../shared/types';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group';
-import { Item, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 
-const SKIP = '__skip__';
+/** Matches below this score are flagged so they get a second look during review. */
+const LOW_CONFIDENCE = 60;
 
-function MatchEditor({ index, item, busy, onSelect, onSearch }: {
+function artworkUrl(track: Track, provider: Provider) {
+  if (track.image) return track.image;
+  // Items saved before artwork was recorded can still show YouTube's predictable thumbnail.
+  return provider === 'youtube' && track.id && !track.unavailable && !track.id.startsWith('unavailable-') ? `https://i.ytimg.com/vi/${encodeURIComponent(track.id)}/mqdefault.jpg` : undefined;
+}
+
+function Artwork({ track, provider, className }: { track: Track | null; provider: Provider; className?: string }) {
+  const src = track ? artworkUrl(track, provider) : undefined;
+  const [failed, setFailed] = useState<string | null>(null);
+  return <div className={cn('flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-muted-foreground', provider === 'youtube' ? 'aspect-video w-18' : 'size-10', className)}>
+    {src && failed !== src
+      ? <img src={src} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="size-full object-cover" onError={() => setFailed(src)} />
+      : <MusicIcon aria-hidden="true" className="size-4" />}
+  </div>;
+}
+
+function TrackText({ track, fallback, className }: { track: Track | null; fallback: string; className?: string }) {
+  if (!track) return <p className={cn('min-w-0 text-sm text-muted-foreground', className)}>{fallback}</p>;
+  return <div className={cn('flex min-w-0 flex-col', className)}>
+    {track.url
+      ? <a href={track.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1 text-sm font-medium hover:underline [&_svg]:size-3.5 [&_svg]:shrink-0"><span className="truncate">{track.title}</span><ArrowUpRightIcon aria-hidden="true" className="text-muted-foreground" /></a>
+      : <strong className="truncate text-sm font-medium">{track.title}</strong>}
+    <span className="truncate text-sm text-muted-foreground">{track.artist || 'Unavailable item'}</span>
+  </div>;
+}
+
+function CandidateOption({ candidate, provider, selected, busy, onSelect }: { candidate: Candidate; provider: Provider; selected: boolean; busy: boolean; onSelect: () => void }) {
+  return <li>
+    <button type="button" aria-pressed={selected} disabled={busy} onClick={onSelect}
+      className={cn('flex w-full items-center gap-3 rounded-lg border p-2 text-left transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50', selected ? 'border-primary bg-muted' : 'border-transparent')}>
+      <Artwork track={candidate} provider={provider} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm font-medium">{candidate.title}</span>
+        <span className="truncate text-sm text-muted-foreground">{candidate.artist}</span>
+      </span>
+      <span className={cn('shrink-0 text-xs tabular-nums', candidate.score < LOW_CONFIDENCE ? 'text-warning' : 'text-muted-foreground')}>{candidate.score}/100</span>
+      <span className="flex size-5 shrink-0 items-center justify-center">{selected ? <CheckIcon aria-hidden="true" className="size-4 text-primary" /> : null}</span>
+    </button>
+  </li>;
+}
+
+function MatchEditor({ index, item, destination, busy, onSelect, onSearch }: {
   index: number;
   item: JobItem;
+  destination: Provider;
   busy: boolean;
   onSelect: (candidateId: string | null) => void;
   onSearch: (query: string) => void;
 }) {
   const [query, setQuery] = useState(`${item.source.artist} ${item.source.title}`);
-  const options = [
-    { value: SKIP, label: 'Skip this track' },
-    ...item.candidates.map(candidate => ({ value: candidate.id, label: `${candidate.title} — ${candidate.artist} (score ${candidate.score}/100)` })),
-  ];
-  return <div className="mt-1 mb-3 flex flex-col gap-4 rounded-lg bg-muted/50 p-3 sm:ml-9">
-    <Field>
-      <FieldLabel htmlFor={`match-${index}`}>Choose a match</FieldLabel>
-      <Select items={options} value={item.selected?.id ?? SKIP} disabled={busy} onValueChange={value => onSelect(value === SKIP ? null : String(value))}>
-        <SelectTrigger id={`match-${index}`} className="w-full" aria-label={`Match for ${item.source.title}`}><SelectValue /></SelectTrigger>
-        <SelectContent alignItemWithTrigger={false} className="w-auto max-w-[calc(100vw-2rem)]">
-          {options.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-        </SelectContent>
-      </Select>
-    </Field>
+  return <div className="flex flex-col gap-4 border-t bg-muted/40 px-3 py-4 sm:pl-12">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <p id={`candidates-${index}`} className="text-sm font-medium">Choose a match</p>
+        <Button variant={item.selected ? 'ghost' : 'secondary'} size="sm" disabled={busy || !item.selected} onClick={() => onSelect(null)}>{item.selected ? 'Skip this track' : 'Skipped'}</Button>
+      </div>
+      {item.candidates.length
+        ? <ul aria-labelledby={`candidates-${index}`} className="flex flex-col gap-1">
+          {item.candidates.map(candidate => <CandidateOption key={candidate.id} candidate={candidate} provider={destination} selected={item.selected?.id === candidate.id} busy={busy} onSelect={() => onSelect(candidate.id)} />)}
+        </ul>
+        : <p className="text-sm text-muted-foreground">No candidates found. Try a different search below.</p>}
+    </div>
     <form onSubmit={event => { event.preventDefault(); onSearch(query); }}>
       <Field>
         <FieldLabel htmlFor={`search-${index}`}>Search for another version</FieldLabel>
@@ -45,9 +86,11 @@ function MatchEditor({ index, item, busy, onSelect, onSearch }: {
   </div>;
 }
 
-export function MatchRow({ index, item, reviewing, expanded, busy, onToggle, onSelect, onSearch }: {
+export function MatchRow({ index, item, source, destination, reviewing, expanded, busy, onToggle, onSelect, onSearch }: {
   index: number;
   item: JobItem;
+  source: Provider;
+  destination: Provider;
   reviewing: boolean;
   expanded: boolean;
   busy: boolean;
@@ -55,26 +98,31 @@ export function MatchRow({ index, item, reviewing, expanded, busy, onToggle, onS
   onSelect: (candidateId: string | null) => void;
   onSearch: (query: string) => void;
 }) {
-  return <div role="listitem">
-    <Item size="sm" className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1 sm:grid-cols-[auto_1fr_auto_1fr_auto]">
-      <span className="order-1 w-6 text-right text-xs text-muted-foreground tabular-nums">{index + 1}</span>
-      <ItemContent className="order-2 min-w-0">
-        <ItemTitle className="max-w-full">
-          {item.source.url ? <a href={item.source.url} target="_blank" rel="noreferrer" className="truncate hover:underline">{item.source.title}</a> : <strong className="truncate font-medium">{item.source.title}</strong>}
-        </ItemTitle>
-        <ItemDescription className="line-clamp-1">{item.source.artist || 'Unavailable item'}</ItemDescription>
-      </ItemContent>
-      {reviewing ? <Button variant="ghost" size="sm" className="order-3 sm:order-5" disabled={busy || item.source.unavailable} aria-expanded={expanded} onClick={onToggle}>{expanded ? 'Close' : 'Review'}</Button> : <span className="order-3 sm:order-5" />}
-      <ArrowRightIcon aria-hidden="true" className="order-3 hidden text-muted-foreground sm:block" />
-      <ItemContent className="order-4 col-span-2 col-start-2 min-w-0 sm:col-span-1 sm:col-start-auto">
-        {item.selected
-          ? <>
-            <ItemTitle className="max-w-full"><a href={item.selected.url} target="_blank" rel="noreferrer" className="inline-flex min-w-0 items-center gap-1 hover:underline [&_svg]:size-3.5 [&_svg]:shrink-0"><span className="truncate">{item.selected.title}</span><ArrowUpRightIcon aria-hidden="true" /></a></ItemTitle>
-            <ItemDescription className="line-clamp-1">{item.selected.artist}</ItemDescription>
-          </>
-          : <ItemDescription>{!item.searched ? 'Waiting for search' : item.source.unavailable ? 'Unavailable · skipped' : 'Skipped'}</ItemDescription>}
-      </ItemContent>
-    </Item>
-    {expanded && reviewing ? <MatchEditor index={index} item={item} busy={busy} onSelect={onSelect} onSearch={onSearch} /> : null}
-  </div>;
+  const lowConfidence = reviewing && item.selected !== null && item.selected.score < LOW_CONFIDENCE;
+  const status = !item.searched ? 'Waiting for search' : item.source.unavailable ? 'Unavailable · skipped' : 'Skipped';
+  return <li className={cn('[contain-intrinsic-size:auto_4rem] [content-visibility:auto]', expanded && 'bg-muted/20')}>
+    <div className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-3 py-2.5 sm:grid-cols-[1.5rem_minmax(0,1fr)_1rem_minmax(0,1fr)_auto]">
+      <span className="text-right text-xs text-muted-foreground tabular-nums">{index + 1}</span>
+      <div className="flex min-w-0 items-center gap-3">
+        <Artwork track={item.source} provider={source} />
+        <TrackText track={item.source} fallback="Unavailable item" />
+      </div>
+      <ArrowRightIcon aria-hidden="true" className="hidden size-4 text-muted-foreground sm:block" />
+      <div className={cn('col-span-2 col-start-2 row-start-2 flex min-w-0 items-center gap-3 sm:col-span-1 sm:col-start-auto sm:row-start-auto', !item.selected && 'opacity-60')}>
+        <Artwork track={item.selected} provider={destination} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <TrackText track={item.selected} fallback={status} />
+          {lowConfidence ? <Badge variant="secondary" className="bg-warning-muted text-warning">Low confidence · {item.selected?.score}/100</Badge> : null}
+        </div>
+      </div>
+      <div className="col-start-3 row-start-1 flex justify-end sm:col-start-auto sm:row-start-auto">
+        {reviewing
+          ? <Button variant="outline" size="sm" disabled={busy || item.source.unavailable} aria-expanded={expanded} aria-label={`${expanded ? 'Close review' : 'Review'} for ${item.source.title}`} onClick={onToggle}>
+            {expanded ? 'Done' : 'Review'}<ChevronDownIcon data-icon="inline-end" className={cn('transition-transform', expanded && 'rotate-180')} />
+          </Button>
+          : null}
+      </div>
+    </div>
+    {expanded && reviewing ? <MatchEditor index={index} item={item} destination={destination} busy={busy} onSelect={onSelect} onSearch={onSearch} /> : null}
+  </li>;
 }

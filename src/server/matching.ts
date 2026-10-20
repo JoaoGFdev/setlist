@@ -12,7 +12,9 @@ export function rank(source: Track, candidates: Track[], destination: Provider):
   return candidates.map((candidate) => {
     const text = `${candidate.title} ${candidate.artist}`;
     let score = coverage(source.title, text) * 60 + coverage(source.artist, text) * 25;
-    if (destination === 'youtube' && /official (music )?video/i.test(candidate.title)) score += 15;
+    // Labels commonly use MV/M/V, including releases uploaded by a record label
+    // whose channel name differs from the artist's name.
+    if (destination === 'youtube' && /\bofficial\s+(?:(?:music\s+)?video|m\s*\/?\s*v)\b/i.test(candidate.title)) score += 15;
     for (const version of ['live', 'remix', 'cover', 'karaoke', 'acoustic', 'instrumental']) {
       if (normalize(text).split(' ').includes(version) && !normalize(`${source.title} ${source.artist}`).split(' ').includes(version)) score -= 25;
     }

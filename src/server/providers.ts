@@ -36,6 +36,10 @@ export function validOAuthBinding(
 const record = (value: unknown): Json => value && typeof value === 'object' ? value as Json : {};
 const str = (value: unknown, fallback = ''): string => typeof value === 'string' ? value : fallback;
 const num = (value: unknown, fallback = 0): number => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+const youtubeThumbnail = (snippet: Json): string | undefined => {
+  const thumbs = record(snippet.thumbnails);
+  return str(record(thumbs.medium).url) || str(record(thumbs.default).url) || undefined;
+};
 
 export function providerConfig(provider: Provider, env: AppEnv) {
   return provider === 'spotify'
@@ -180,8 +184,10 @@ export class Providers {
     const artists = Array.isArray(input.artists) ? input.artists : [];
     const external = record(input.external_urls);
     const id = str(input.id);
+    // Spotify lists album art largest first; the smallest is enough for a row thumbnail.
+    const images = Array.isArray(record(input.album).images) ? record(input.album).images as unknown[] : [];
     return { id, title: str(input.name), artist: artists.map((artist) => str(record(artist).name)).filter(Boolean).join(', '), duration: num(input.duration_ms) || undefined,
-      url: str(external.spotify, `https://open.spotify.com/track/${id}`) };
+      url: str(external.spotify, `https://open.spotify.com/track/${id}`), image: str(record(images.at(-1)).url) || undefined };
   }
   async sourcePage(provider: Provider, playlistId: string, cursor?: string): Promise<Page<Track>> {
     let path: string;
@@ -205,7 +211,7 @@ export class Providers {
       const content = record(item.contentDetails); const snippet = record(item.snippet);
       const id = str(content.videoId); const title = str(snippet.title, 'Unavailable video');
       const unavailable = !id || ['Private video', 'Deleted video'].includes(title);
-      return { id: id || `unavailable-${index}`, ...splitVideoTitle(title, str(snippet.videoOwnerChannelTitle)), url: id ? `https://www.youtube.com/watch?v=${id}` : '', unavailable };
+      return { id: id || `unavailable-${index}`, ...splitVideoTitle(title, str(snippet.videoOwnerChannelTitle)), url: id ? `https://www.youtube.com/watch?v=${id}` : '', image: unavailable ? undefined : youtubeThumbnail(snippet), unavailable };
     });
     return { items: tracks, nextCursor: provider === 'spotify' ? str(body.next) || undefined : str(body.nextPageToken) || undefined };
   }
@@ -241,7 +247,9 @@ export class Providers {
   }
   async search(destination: Provider, source: Track, customQuery?: string): Promise<Candidate[]> {
     const query = customQuery || `${source.artist} ${source.title}${destination === 'youtube' ? ' official music video' : ''}`;
-    const cacheKey = `search:${destination}:${query.toLowerCase()}`;
+    const cacheKey = destination === 'youtube'
+      ? `search:${destination}:mv-v2:${query.toLowerCase()}`
+      : `search:${destination}:${query.toLowerCase()}`;
     const cached = await this.store.get<{ at: number; expiresAt: number; tracks: Track[] }>(cacheKey);
     let tracks: Track[];
     if (cached && Date.now() - cached.at < 7 * 86_400_000) tracks = cached.tracks;
@@ -251,10 +259,10 @@ export class Providers {
       const at = Date.now();
       await this.store.set(cacheKey, { at, expiresAt: at + 7 * 86_400_000, tracks });
     } else {
-      const data = await this.api(destination, `search?part=snippet&type=video&videoCategoryId=10&maxResults=5&q=${encodeURIComponent(query)}`);
+      const data = await this.api(destination, `search?part=snippet&type=video&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(query)}`);
       tracks = (Array.isArray(data.items) ? data.items : []).map((entry) => {
         const item = record(entry); const id = str(record(item.id).videoId); const snippet = record(item.snippet);
-        return { id, title: str(snippet.title), artist: str(snippet.channelTitle), url: `https://www.youtube.com/watch?v=${id}` };
+        return { id, title: str(snippet.title), artist: str(snippet.channelTitle), url: `https://www.youtube.com/watch?v=${id}`, image: youtubeThumbnail(snippet) };
       });
       const at = Date.now();
       await this.store.set(cacheKey, { at, expiresAt: at + 7 * 86_400_000, tracks });

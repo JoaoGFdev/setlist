@@ -16,6 +16,8 @@ export interface Track {
   artist: string;
   url: string;
   duration?: number;
+  /** Album art or video thumbnail. Absent on items saved before artwork was recorded. */
+  image?: string;
   unavailable?: boolean;
 }
 
