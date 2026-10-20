@@ -1,0 +1,13 @@
+# Project-scoped MCP servers. OAuth credentials are stored by Codex outside this repository.
+[mcp_servers.cloudflare-docs]
+url = "https://docs.mcp.cloudflare.com/mcp"
+startup_timeout_sec = 30
+
+[mcp_servers.cloudflare]
+url = "https://mcp.cloudflare.com/mcp"
+startup_timeout_sec = 30
+scopes = ["offline_access", "user:read", "account:read", "workers-scripts.read", "workers-scripts.write", "workers-scripts.bind", "workers-routes.read", "workers-routes.write", "d1.metadata_read", "d1.read", "d1.write", "zone.read", "dns.read", "dns.write"]
+
+[mcp_servers.clerk]
+url = "https://mcp.clerk.com/mcp"
+startup_timeout_sec = 30
