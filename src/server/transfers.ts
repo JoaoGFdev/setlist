@@ -116,8 +116,11 @@ export class Transfers {
       const job = await this.requiredJob(id);
       if (job.phase === 'complete') return job;
       if (job.state !== 'running') throw new ServiceError('Resume this transfer before asking for another step.', 409);
-      await this.assertAccounts(job);
+      if (job.nextStepAt && job.nextStepAt > Date.now()) return job;
+      job.nextStepAt = undefined;
+      job.message = undefined;
       try {
+        await this.assertAccounts(job);
         if (job.phase === 'loading') return await this.loadPage(job, token);
         if (job.phase === 'matching') return await this.matchBatch(job, token);
         if (job.phase === 'transferring') return await this.transferStep(job, token);
@@ -126,6 +129,13 @@ export class Transfers {
         try {
           await this.assertLease(token);
           const durable = await this.requiredJob(id);
+          if (error instanceof ServiceError && error.retryAt) {
+            durable.rateLimitAttempts = (durable.rateLimitAttempts ?? 0) + 1;
+            durable.nextStepAt = Math.max(error.retryAt, Date.now() + Math.min(300_000, 30_000 * 2 ** Math.min(durable.rateLimitAttempts - 1, 4)));
+            durable.message = error.message;
+            await this.save(durable, token);
+            return durable;
+          }
           durable.state = 'paused';
           durable.message = error instanceof Error ? error.message : 'Transfer paused. Retry to continue.';
           await this.save(durable, token);
@@ -164,7 +174,7 @@ export class Transfers {
   private async matchBatch(job: JobSummary, token: string): Promise<JobSummary> {
     // Bound provider requests per invocation; keep writes serialized under the lease.
     const start = job.matchPosition;
-    const positions = Array.from({ length: Math.min(3, job.totalCount - start) }, (_, offset) => start + offset);
+    const positions = Array.from({ length: Math.min(1, job.totalCount - start) }, (_, offset) => start + offset);
     const items = await Promise.all(positions.map((position) => this.store.get<JobItem>(itemKey(job.id, position))));
     if (items.some((item) => !item)) throw new ServiceError('A saved source track is missing. Resume after storage is available.', 500);
     const results = await Promise.allSettled(items.map(async (item) => {
@@ -244,6 +254,17 @@ export class Transfers {
       job.updatedAt = timestamp();
       const expiresAt = Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS;
       await this.store.setMany([{ key: `job:${job.id}`, value: { ...job, expiresAt } }, { key: EXPECTED_KEY(job.id), value: { ids: expected, expiresAt } }]);
+      return this.get(id);
+    });
+  }
+  async pause(id: string): Promise<FullJob> {
+    return this.withLease(async (token) => {
+      const job = await this.requiredJob(id);
+      if (job.phase !== 'complete' && job.phase !== 'review') {
+        job.state = 'paused';
+        job.message = 'Transfer paused. Progress is saved.';
+        await this.save(job, token);
+      }
       return this.get(id);
     });
   }

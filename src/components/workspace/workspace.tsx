@@ -48,6 +48,9 @@ export function Workspace({ userId }: { userId: string }) {
   const setJobs = (update: JobSummary[] | ((current: JobSummary[]) => JobSummary[])) => jobsQuery.setData(current => typeof update === 'function' ? update(current ?? []) : update);
   const [armed, setArmed] = useState(false);
   const runToken = useRef(0);
+  const pendingStep = useRef<Promise<JobSummary> | null>(null);
+  const [pausing, setPausing] = useState(false);
+  const pauseRequested = useRef(false);
   const refreshAccounts = () => { void client.invalidateQueries({ queryKey: resourceKey(userId, '/status') }); };
 
   useEffect(() => () => { runToken.current++; }, []);
@@ -63,18 +66,29 @@ export function Workspace({ userId }: { userId: string }) {
   }
 
   async function runJob(initial: FullJob) {
+    pauseRequested.current = false;
     const token = ++runToken.current;
     setActiveId(initial.id); setActiveJob(initial); setArmed(true);
     let job = initial;
+    let nextStepAt = 0;
     try {
       while (token === runToken.current && job.state === 'running' && job.phase !== 'review' && job.phase !== 'complete') {
-        const summary = await api<JobSummary>(`/jobs/${job.id}/step`, {});
+        const waitUntil = Math.max(job.nextStepAt ?? 0, nextStepAt);
+        while (Date.now() < waitUntil && token === runToken.current && !pauseRequested.current) {
+          await new Promise(resolve => setTimeout(resolve, Math.min(250, waitUntil - Date.now())));
+        }
+        if (token !== runToken.current || pauseRequested.current) break;
+        const request = api<JobSummary>(`/jobs/${job.id}/step`, {});
+        pendingStep.current = request;
+        const summary = await request.finally(() => { if (pendingStep.current === request) pendingStep.current = null; });
         if (token !== runToken.current) {
+          if (pauseRequested.current) return;
           // A write can finish after navigation stopped the loop; revalidate that job on return.
           void client.invalidateQueries({ queryKey: resourceKey(userId, '/jobs') });
           void client.invalidateQueries({ queryKey: resourceKey(userId, `/jobs/${job.id}`) });
           return;
         }
+        nextStepAt = Date.now() + 1_500;
         setJobs(current => [summary, ...current.filter(item => item.id !== summary.id)]);
         job = { ...job, ...summary };
         setActiveJob(job);
@@ -93,6 +107,19 @@ export function Workspace({ userId }: { userId: string }) {
       }
     }
     finally { if (token === runToken.current) setArmed(false); }
+  }
+
+  async function pauseJob(job: FullJob) {
+    pauseRequested.current = true;
+    runToken.current++;
+    setPausing(true);
+    try {
+      // Let an in-flight provider write checkpoint before persisting the pause.
+      await pendingStep.current?.catch(() => undefined);
+      const paused = await api<FullJob>(`/jobs/${job.id}/pause`, {});
+      updateJob(paused);
+    } catch (cause) { toast.error((cause as Error).message); }
+    finally { setArmed(false); setPausing(false); }
   }
 
   async function openJob(id: string) {
@@ -147,7 +174,7 @@ export function Workspace({ userId }: { userId: string }) {
         </Select> : null}
       </div>
       {activeId && activeQuery.isPending ? <div role="status" className="text-sm text-muted-foreground">Loading transfer…</div> : activeJob
-        ? <TransferPanel key={activeJob.id} job={activeJob} armed={armed} onStart={runJob} onUpdate={updateJob} onDeleted={removeJob} />
+        ? <TransferPanel key={activeJob.id} job={activeJob} armed={armed} pausing={pausing} onPause={pauseJob} onStart={runJob} onUpdate={updateJob} onDeleted={removeJob} />
         : <Empty className="border">
           <EmptyHeader>
             <EmptyMedia variant="icon"><ArrowLeftRightIcon /></EmptyMedia>

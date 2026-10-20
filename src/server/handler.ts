@@ -102,11 +102,12 @@ export async function dispatchApi(request: Request, env: AppEnv, userId: string)
       await transfers.clear();
       return json({ ok: true });
     }
-    const jobAction = path.match(/^\/api\/jobs\/([^/]+)\/(step|select|search|approve|resume|delete)$/);
+    const jobAction = path.match(/^\/api\/jobs\/([^/]+)\/(step|select|search|approve|resume|pause|delete)$/);
     if (request.method === 'POST' && jobAction) {
       const id = decodeURIComponent(jobAction[1]); const action = jobAction[2];
       if (action === 'step') return json(await transfers.step(id));
       if (action === 'approve') return json(await transfers.approve(id));
+      if (action === 'pause') return json(await transfers.pause(id));
       if (action === 'resume') return json(await transfers.resume(id));
       if (action === 'delete') { await body(request); await transfers.delete(id); return json({ ok: true }); }
       const input = await body(request);

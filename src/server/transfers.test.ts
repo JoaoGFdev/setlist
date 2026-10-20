@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Candidate, JobSummary, JobItem, Provider, Track } from '../../shared/types';
 import type { AppEnv } from './env';
-import { Providers, ServiceError, validOAuthBinding } from './providers';
+import { Providers, ServiceError, readResponse, validOAuthBinding } from './providers';
 import { Transfers } from './transfers';
 import { Store, type Credentials } from './store';
 
@@ -86,6 +86,9 @@ test('a source load step fetches one page and matching searches a bounded batch'
   assert.equal(sourceCalls, 2);
   assert.equal(summary.totalCount, 3);
   assert.equal(summary.phase, 'matching');
+  summary = await domain.step(created.id);
+  assert.equal(summary.matchedCount, 1);
+  summary = await domain.step(created.id);
   summary = await domain.step(created.id);
   assert.equal(summary.matchedCount, 3);
   assert.equal(searches, 3);
@@ -171,6 +174,7 @@ test('unavailable source positions advance one step without blocking later match
     { source: { ...track('unavailable'), unavailable: true }, candidates: [], selected: null, searched: true },
     { source: track('available'), candidates: [], selected: null, searched: false },
   ]);
+  await transfers.step(job.id);
   const last = await transfers.step(job.id);
   assert.equal(last.matchPosition, 2);
   assert.equal(searches, 1);
@@ -354,17 +358,13 @@ test('clear removes every job document but keeps preferences, credentials and di
   assert.deepEqual(await transfers.list(), []);
 });
 
-test('matching runs three searches concurrently and retains successes around a failed position', async () => {
+test('matching checkpoints each success and retries a failed position', async () => {
   const { store } = setup();
   const calls: string[] = [];
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
   let fail = true;
   class Fake extends Providers {
     override async search(_provider: Provider, source: Track) {
       calls.push(source.id);
-      if (calls.length === 3) release();
-      await gate;
       if (source.id === 'b' && fail) throw new Error('temporary search failure');
       return [candidate(source.id)];
     }
@@ -373,19 +373,74 @@ test('matching runs three searches concurrently and retains successes around a f
   const job = makeJob({ phase: 'matching', destinationId: undefined, totalCount: 4 });
   await store.set(`job:${job.id}`, job);
   await putItems(store, job.id, ['a', 'b', 'c', 'd'].map((id) => ({ source: track(id), candidates: [], selected: null, searched: false })));
+  await transfers.step(job.id);
   await assert.rejects(transfers.step(job.id), /temporary search failure/);
-  assert.deepEqual(calls, ['a', 'b', 'c']);
+  assert.deepEqual(calls, ['a', 'b']);
   const paused = await transfers.get(job.id);
   assert.equal(paused.state, 'paused');
   assert.equal(paused.matchPosition, 1);
-  assert.equal(paused.matchedCount, 2);
-  assert.deepEqual(paused.items.map((item) => item.searched), [true, false, true, false]);
+  assert.equal(paused.matchedCount, 1);
+  assert.deepEqual(paused.items.map((item) => item.searched), [true, false, false, false]);
   fail = false;
   await transfers.resume(job.id);
+  await transfers.step(job.id);
+  await transfers.step(job.id);
   const complete = await transfers.step(job.id);
-  assert.deepEqual(calls, ['a', 'b', 'c', 'b', 'd']);
+  assert.deepEqual(calls, ['a', 'b', 'b', 'c', 'd']);
   assert.equal(complete.phase, 'review');
   assert.equal(complete.matchedCount, 4);
   assert.equal(complete.selectedCount, 4);
   assert.deepEqual((await transfers.get(job.id)).items.map((item) => item.selected?.id), ['a', 'b', 'c', 'd']);
+});
+
+
+test('temporary rate limits persist a cooldown that resume cannot bypass', async () => {
+  const { store } = setup();
+  let calls = 0;
+  class Fake extends Providers {
+    override async search(): Promise<Candidate[]> {
+      calls++;
+      throw new ServiceError('Waiting for rate limit', 429, 'rateLimitExceeded', Date.now() + 90_000);
+    }
+  }
+  const transfers = new Transfers(store, new Fake(store, env));
+  const job = makeJob({ phase: 'matching', totalCount: 1 });
+  await store.set(`job:${job.id}`, job);
+  await putItems(store, job.id, [{ source: track('a'), candidates: [], selected: null, searched: false }]);
+  const waiting = await transfers.step(job.id);
+  assert.equal(waiting.state, 'running');
+  assert.ok(waiting.nextStepAt! >= Date.now() + 89_000);
+  assert.equal(waiting.matchPosition, 0);
+  await transfers.pause(job.id);
+  await transfers.resume(job.id);
+  await transfers.step(job.id);
+  assert.equal(calls, 1);
+});
+
+test('manual pause preserves progress and prevents provider requests until resumed', async () => {
+  const { store, providers, transfers } = setup();
+  let calls = 0;
+  providers.search = async () => { calls++; return [candidate('a')]; };
+  const job = makeJob({ phase: 'matching', totalCount: 1 });
+  await store.set(`job:${job.id}`, job);
+  await putItems(store, job.id, [{ source: track('a'), candidates: [], selected: null, searched: false }]);
+  const paused = await transfers.pause(job.id);
+  assert.equal(paused.state, 'paused');
+  assert.equal(paused.matchPosition, 0);
+  await assert.rejects(transfers.step(job.id), /Resume/);
+  assert.equal(calls, 0);
+  await transfers.resume(job.id);
+  assert.equal((await transfers.step(job.id)).phase, 'review');
+  assert.equal(calls, 1);
+});
+
+test('rate limits parse numeric and HTTP-date Retry-After headers and distinguish daily quota', async () => {
+  for (const header of ['120', new Date(Date.now() + 120_000).toUTCString()]) {
+    await assert.rejects(readResponse(Response.json({}, { status: 429, headers: { 'Retry-After': header } })),
+      (error: unknown) => error instanceof ServiceError && error.retryAt! > Date.now() + 118_000);
+  }
+  await assert.rejects(readResponse(Response.json({ error: { errors: [{ reason: 'quotaExceeded' }] } }, { status: 403 })),
+    (error: unknown) => error instanceof ServiceError && error.retryAt === undefined && /daily quota/.test(error.message));
+  await assert.rejects(readResponse(Response.json({ error: { errors: [{ reason: 'userRateLimitExceeded' }] } }, { status: 403 })),
+    (error: unknown) => error instanceof ServiceError && error.retryAt! > Date.now());
 });

@@ -23,9 +23,11 @@ function Direction({ provider }: { provider: Provider }) {
   </Badge>;
 }
 
-export function TransferPanel({ job, armed, onStart, onUpdate, onDeleted }: {
+export function TransferPanel({ job, armed, pausing, onPause, onStart, onUpdate, onDeleted }: {
   job: FullJob;
   armed: boolean;
+  pausing: boolean;
+  onPause: (job: FullJob) => Promise<void>;
   onStart: (job: FullJob) => void;
   onUpdate: (job: FullJob) => void;
   onDeleted: (id: string) => void;
@@ -43,7 +45,8 @@ export function TransferPanel({ job, armed, onStart, onUpdate, onDeleted }: {
   // Steps are driven from the browser, so a running transfer opened after a reload or
   // navigation would otherwise sit idle. Pick it back up once; the button remains as a fallback.
   useEffect(() => {
-    if (!active || armed || autoContinued.current) return;
+    if (armed || pausing) { autoContinued.current = true; return; }
+    if (!active || autoContinued.current) return;
     autoContinued.current = true;
     void action('resume', {}, true);
   });
@@ -68,7 +71,8 @@ export function TransferPanel({ job, armed, onStart, onUpdate, onDeleted }: {
           : `${selected} selected · ${job.totalCount - selected} skipped`;
   const progressMax = job.phase === 'transferring' ? selected : job.totalCount;
   const progressValue = job.phase === 'loading' ? job.totalCount : job.phase === 'matching' ? matched : job.inserted;
-  const phaseBadge = job.state === 'paused' ? { label: 'Paused', className: 'bg-warning-muted text-warning' }
+  const phaseBadge = job.state === 'running' && job.nextStepAt && job.nextStepAt > Date.now() ? { label: 'Waiting for rate limit', className: 'bg-warning-muted text-warning' }
+    : job.state === 'paused' ? { label: 'Paused', className: 'bg-warning-muted text-warning' }
     : job.phase === 'complete' ? { label: phaseLabels.complete, className: 'bg-success-muted text-success' }
       : { label: phaseLabels[job.phase], className: '' };
 
@@ -92,6 +96,7 @@ export function TransferPanel({ job, armed, onStart, onUpdate, onDeleted }: {
                 : active
                   ? <span role="status" className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner aria-hidden="true" />{job.phase === 'loading' ? 'Loading tracks…' : job.phase === 'matching' ? 'Finding matches…' : 'Adding tracks…'}</span>
                   : null}
+        {active ? <Button variant="outline" disabled={busy || pausing} onClick={() => void onPause(job)}>{pausing ? 'Pausing…' : 'Pause transfer'}</Button> : null}
         <Tooltip>
           <TooltipTrigger render={<Button variant="ghost" size="icon" aria-label="Remove from history" disabled={busy} className="text-muted-foreground hover:text-destructive" onClick={() => setConfirmRemove(true)} />}><Trash2Icon /></TooltipTrigger>
           <TooltipContent>Remove from history</TooltipContent>
@@ -100,7 +105,7 @@ export function TransferPanel({ job, armed, onStart, onUpdate, onDeleted }: {
     </CardHeader>
     <CardContent className="flex flex-col gap-4">
       {active ? <Progress aria-label="Transfer progress" value={Math.round(100 * progressValue / Math.max(progressMax, 1))} /> : null}
-      {job.message ? <Alert role="status"><AlertDescription>{job.message}</AlertDescription></Alert>
+      {job.message ? <Alert role="status"><AlertDescription>{job.message}{job.state === 'running' && job.nextStepAt ? ` Next attempt after ${new Date(job.nextStepAt).toLocaleTimeString()}.` : ''}</AlertDescription></Alert>
         : active && !armed && !busy ? <Alert role="status"><AlertDescription>This transfer stopped when it was last left open. Choose Continue transfer to pick up where it left off.</AlertDescription></Alert> : null}
       {reviewing ? <p className="text-sm text-muted-foreground">Matches are suggestions. Open a result to check it, choose another candidate, or skip the track.</p> : null}
       {job.items.length ? <div className="overflow-hidden rounded-lg border">
