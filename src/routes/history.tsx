@@ -1,11 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { PageHeader } from '@/components/pages/page-header';
+import { RequireSignIn } from '@/components/pages/require-sign-in';
+import { TransferHistory, historyDescription, historyTitle } from '@/components/pages/transfer-history';
 
 export const Route = createFileRoute('/history')({
   head: () => ({ meta: [{ title: 'Transfer history — Setlist' }] }),
-  component: Page,
+  component: HistoryPage,
 });
 
-function Page() {
-  return <Empty><EmptyHeader><EmptyTitle>Transfer history</EmptyTitle><EmptyDescription>Coming soon.</EmptyDescription></EmptyHeader></Empty>;
+export function HistoryPage() {
+  return <RequireSignIn header={<PageHeader title={historyTitle} description={historyDescription} />}>{() => <TransferHistory />}</RequireSignIn>;
 }
