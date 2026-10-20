@@ -1,17 +1,23 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "playlist-bridge",
-  "main": "@tanstack/react-start/server-entry",
+  "name": "setlist",
+  "main": "src/worker.ts",
   "compatibility_date": "2026-10-19",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
   "assets": { "directory": "./dist/client", "binding": "ASSETS" },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "playlist-bridge",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_name": "setlist",
+      "database_id": "f9ac2239-0112-4405-98f0-1f3c7c6d5cfa",
       "migrations_dir": "drizzle"
     }
   ],
-  "vars": { "APP_URL": "http://127.0.0.1:5173" }
+  "triggers": { "crons": ["0 0 * * *"] },
+  "vars": {
+    "APP_URL": "https://setlist.joaogf.dev",
+    "GOOGLE_CLIENT_ID": "461683360007-3377slq154fg3ncoblgk81ea9tabtin4.apps.googleusercontent.com",
+    "SPOTIFY_CLIENT_ID": "d109dfb8abe548bc96fb2f5cbfc03f62"
+  }
 }

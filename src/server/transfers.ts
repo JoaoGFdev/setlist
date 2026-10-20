@@ -4,6 +4,8 @@ import { Providers, ServiceError } from './providers';
 
 const LEASE = 'workspace';
 const LEASE_TTL = 60_000;
+// Leave one day for the scheduled purge so data is physically removed within 30 days.
+const WORKSPACE_RETENTION_MS = 29 * 24 * 60 * 60 * 1000;
 const ITEM_PREFIX = (id: string) => `item:${id}:`;
 const EXPECTED_KEY = (id: string) => `expected:${id}`;
 const itemKey = (id: string, position: number) => `${ITEM_PREFIX(id)}${String(position).padStart(8, '0')}`;
@@ -28,7 +30,7 @@ export class Transfers {
   private async save(job: JobSummary, token: string) {
     await this.assertLease(token);
     job.updatedAt = timestamp();
-    await this.store.set(`job:${job.id}`, job);
+    await this.store.set(`job:${job.id}`, { ...job, expiresAt: Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS });
   }
   async get(id: string): Promise<FullJob> {
     const job = await this.store.get<JobSummary>(`job:${id}`);
@@ -122,7 +124,8 @@ export class Transfers {
     const entries = page.items.map((source): JobItem => ({ source, candidates: [], selected: null, searched: Boolean(source.unavailable) }));
     if (entries.length) {
       await this.assertLease(token);
-      await this.store.setMany(entries.map((value, index) => ({ key: itemKey(job.id, job.sourcePosition + index), value })));
+      const expiresAt = Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS;
+      await this.store.setMany(entries.map((value, index) => ({ key: itemKey(job.id, job.sourcePosition + index), value: { ...value, expiresAt } })));
     }
     await this.assertLease(token);
     job.sourcePosition += entries.length;
@@ -150,14 +153,15 @@ export class Transfers {
     }
     const candidates = await this.providers.search(job.destination, current.source);
     await this.assertLease(token);
-    const item = { ...current, candidates, selected: candidates[0] || null, searched: true };
+    const expiresAt = Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS;
+    const item = { ...current, candidates, selected: candidates[0] || null, searched: true, expiresAt };
     job.matchedCount += 1;
     if (item.selected) job.selectedCount += 1;
     job.matchPosition += 1;
     if (job.matchPosition >= job.totalCount) { job.phase = 'review'; job.state = 'idle'; }
     await this.assertLease(token);
     job.updatedAt = timestamp();
-    await this.store.setMany([{ key, value: item }, { key: `job:${job.id}`, value: job }]);
+    await this.store.setMany([{ key, value: item }, { key: `job:${job.id}`, value: { ...job, expiresAt } }]);
     return job;
   }
   async select(id: string, index: number, candidateId: string | null): Promise<FullJob> {
@@ -170,7 +174,8 @@ export class Transfers {
       await this.assertLease(token);
       job.selectedCount += Number(Boolean(candidate)) - Number(Boolean(item.selected));
       job.updatedAt = timestamp();
-      await this.store.setMany([{ key, value: { ...item, selected: candidate } }, { key: `job:${job.id}`, value: job }]);
+      const expiresAt = Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS;
+      await this.store.setMany([{ key, value: { ...item, selected: candidate, expiresAt } }, { key: `job:${job.id}`, value: { ...job, expiresAt } }]);
       return this.get(id);
     });
   }
@@ -184,7 +189,8 @@ export class Transfers {
       const unique = new Map<string, Candidate>(item.candidates.map((candidate) => [candidate.id, candidate]));
       results.forEach((candidate) => unique.set(candidate.id, candidate));
       const candidates = [...unique.values()].sort((a, b) => b.score - a.score);
-      await this.store.set(key, { ...item, candidates, searched: true });
+      const expiresAt = Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS;
+      await this.store.set(key, { ...item, candidates, searched: true, expiresAt });
       await this.save(job, token);
       return this.get(id);
     });
@@ -201,7 +207,8 @@ export class Transfers {
       job.reconcileCursor = undefined; job.reconcilePosition = 0; job.reconcileChecked = 0; job.inserted = 0;
       await this.assertLease(token);
       job.updatedAt = timestamp();
-      await this.store.setMany([{ key: `job:${job.id}`, value: job }, { key: EXPECTED_KEY(job.id), value: expected }]);
+      const expiresAt = Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS;
+      await this.store.setMany([{ key: `job:${job.id}`, value: { ...job, expiresAt } }, { key: EXPECTED_KEY(job.id), value: { ids: expected, expiresAt } }]);
       return this.get(id);
     });
   }
@@ -224,7 +231,8 @@ export class Transfers {
   }
 
   private async transferStep(job: JobSummary, token: string): Promise<JobSummary> {
-    const expected = await this.store.get<string[]>(EXPECTED_KEY(job.id));
+    const expectedData = await this.store.get<{ ids: string[] }>(EXPECTED_KEY(job.id));
+    const expected = expectedData?.ids;
     if (!expected?.length) throw new ServiceError('The approved transfer list is missing. Review and approve this transfer again.', 409);
     if (!job.destinationId) return this.discoverOrCreate(job, token);
     if (job.reconcilePosition < 0) throw new ServiceError('Invalid saved reconciliation position.', 500);
@@ -283,7 +291,8 @@ export class Transfers {
     return job;
   }
   private async reconcilePage(job: JobSummary, token: string): Promise<JobSummary> {
-    const expected = await this.store.get<string[]>(EXPECTED_KEY(job.id));
+    const expectedData = await this.store.get<{ ids: string[] }>(EXPECTED_KEY(job.id));
+    const expected = expectedData?.ids;
     if (!expected?.length) throw new ServiceError('The approved transfer list is missing. Review and approve this transfer again.', 409);
     const page = await this.providers.destinationPage(job.destination, job.destinationId!, job.reconcileCursor);
     await this.assertLease(token);

@@ -114,6 +114,15 @@ export class Store {
     await this.db.delete(appDocuments).where(and(eq(appDocuments.userId, this.userId), eq(appDocuments.key, key)));
   }
 
+  async deleteWorkspaceDocuments(name: string, token: string): Promise<void> {
+    const result = await this.database.prepare(`
+      DELETE FROM app_documents WHERE user_id = ?
+        AND EXISTS (SELECT 1 FROM operation_leases
+          WHERE user_id = ? AND name = ? AND token = ? AND expires_at > ${DATABASE_NOW_SQL})
+    `).bind(this.userId, this.userId, name, token).run();
+    if (result.meta.changes === 0) await this.assertLease(name, token);
+  }
+
   async list<T>(prefix: string): Promise<T[]> {
     const now = Date.now();
     const pattern = escapeLikePrefix(prefix);

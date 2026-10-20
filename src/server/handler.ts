@@ -113,7 +113,11 @@ export async function dispatchApi(request: Request, env: AppEnv, userId: string)
       if (!isProvider(provider)) throw new ServiceError('Unknown music service.');
       const token = await store.acquireLease('workspace', 60_000);
       if (!token) throw new ServiceError('Another operation is active. Wait a moment, then retry.', 409);
-      try { await store.assertLease('workspace', token); await store.deleteCredentials(provider); }
+      try {
+        await store.assertLease('workspace', token);
+        await store.deleteWorkspaceDocuments('workspace', token);
+        await store.deleteCredentials(provider);
+      }
       finally { await store.releaseLease('workspace', token); }
       return json({ ok: true });
     }

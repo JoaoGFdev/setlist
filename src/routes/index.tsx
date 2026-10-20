@@ -1,6 +1,7 @@
 import { SignInButton, UserButton, useAuth } from '@clerk/tanstack-react-start';
 import { createFileRoute } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
+import iconUrl from '../../assets/icon.svg?url';
 import type { FullJob, JobSummary, Page, Playlist, Provider, Status } from '../../shared/types';
 
 const names: Record<Provider, string> = { spotify: 'Spotify', youtube: 'YouTube' };
@@ -52,7 +53,7 @@ export function App() {
 
   const publishableConfigured = Boolean(import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
   return <>
-    <header className="topbar"><a href="/" className="wordmark"><span className="bridge-symbol" aria-hidden="true">⌒</span> Playlist Bridge</a>
+    <header className="topbar"><a href="/" className="wordmark"><img className="brand-logo" src={iconUrl} alt="" /> Setlist</a>
       <span className="local-badge"><span /> Private, request-driven transfers</span>
       <div className="topbar-actions"><button className="text-button" onClick={() => setSetup(value => !value)} aria-expanded={setup}>Account setup</button>
         {publishableConfigured ? <AuthControls /> : <span className="small">Sign-in setup required</span>}
@@ -64,7 +65,7 @@ export function App() {
       {setup ? <Setup status={null} /> : null}
       {!publishableConfigured ? <div className="notice"><div><strong>Set up secure sign-in to use your workspace.</strong><p>Configure Clerk keys in your Worker and publishable key in the Vite environment. Provider credentials remain separate.</p></div><button className="secondary" onClick={() => setSetup(true)}>View setup steps</button></div> : null}
       {publishableConfigured ? <AuthSession onError={setError} onSetup={() => setSetup(true)} /> : null}
-      <footer><span>Personal use. No transfer subscription. No app-imposed song cap.</span><span>Platform quotas apply; active work advances one request at a time.</span></footer>
+      <footer><span>Personal use. No transfer subscription. No app-imposed song cap.</span><span className="footer-links"><span>Platform quotas apply; active work advances one request at a time.</span><a href="/privacy-policy">Privacy</a><a href="/terms-of-service">Terms</a></span></footer>
     </main>
   </>;
 }
@@ -149,7 +150,7 @@ function Workspace({ userId, onError, onSetup }: { userId: string; onError: (mes
 
   if (!status) return <p role="status" className="loading">Loading your workspace…</p>;
   return <>
-    {!status.configured.spotify || !status.configured.youtube ? <div className="notice"><div><strong>Connect your own music accounts.</strong><p>Spotify and Google OAuth are separate from signing in to Playlist Bridge.</p></div><button className="secondary" onClick={onSetup}>View setup steps</button></div> : null}
+    {!status.configured.spotify || !status.configured.youtube ? <div className="notice"><div><strong>Connect your own music accounts.</strong><p>Spotify and Google OAuth are separate from signing in to Setlist.</p></div><button className="secondary" onClick={onSetup}>View setup steps</button></div> : null}
     <div className="libraries">{providers.map(provider => <Library key={provider} provider={provider} status={status} onError={onError} onSetup={onSetup} onCreated={job => { updateJob(job); void runJob(job); }} onDisconnect={() => setRefresh(value => value + 1)} />)}</div>
     <section className="transfer-section" aria-labelledby="transfer-heading"><div className="section-heading"><div><h2 id="transfer-heading">Transfer workspace</h2><p>Match first. Review the results. Create a private playlist.</p></div>{jobs.length ? <label className="history-label">Transfer<select value={activeId || ''} onChange={event => void openJob(event.target.value)}>{jobs.map(job => <option key={job.id} value={job.id}>{job.name} · {job.phase}</option>)}</select></label> : null}</div>
       {activeJob ? <Transfer key={activeJob.id} job={activeJob} armed={armed} onStart={runJob} onUpdate={updateJob} onError={onError} /> : <div className="empty-workspace"><span aria-hidden="true">↔</span><h3>A new home for your favorites</h3><p>Connect both accounts, then choose a playlist above.<br />You’ll review the songs here before anything is created.</p></div>}
@@ -195,6 +196,7 @@ function Library({ provider, status, onError, onSetup, onCreated, onDisconnect }
     finally { setMoreBusy(false); }
   }
   async function disconnect() {
+    if (!window.confirm(`Disconnect ${names[provider]}? This also deletes your saved transfer history.`)) return;
     setBusy(true);
     try { await api(`/accounts/${provider}/disconnect`, {}); onDisconnect(); }
     catch (cause) { onError((cause as Error).message); }

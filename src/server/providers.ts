@@ -234,7 +234,7 @@ export class Providers {
     return rank(source, tracks, destination);
   }
   async createPlaylist(provider: Provider, name: string, marker: string): Promise<{ id: string; url: string }> {
-    const description = `Transferred with Playlist Bridge. ${marker}`;
+    const description = `Transferred with Setlist. ${marker}`;
     const created = provider === 'spotify'
       ? await this.api(provider, 'me/playlists', { method: 'POST', body: JSON.stringify({ name, description, public: false }) })
       : await this.api(provider, 'playlists?part=snippet,status', { method: 'POST', body: JSON.stringify({ snippet: { title: name, description }, status: { privacyStatus: 'private' } }) });
