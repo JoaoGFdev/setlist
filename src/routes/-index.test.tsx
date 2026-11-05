@@ -171,7 +171,7 @@ describe('authenticated workspace UI', () => {
     await user.click(screen.getByRole('button', { name: 'Find matches' }));
     expect(await screen.findByText('Matches are suggestions. Open a result to check it, choose another candidate, or skip the track.', {}, { timeout: 4_000 })).toBeTruthy();
     expect(stepCount).toBe(2);
-    expect(stepTimes[1] - stepTimes[0]).toBeGreaterThanOrEqual(1_500);
+    expect(stepTimes[1] - stepTimes[0]).toBeGreaterThanOrEqual(250);
     expect(fetchMock.mock.calls.filter(([input, init]) => requestPath(input) === '/api/jobs/job-created' && method(init) === 'GET')).toHaveLength(1);
   });
 

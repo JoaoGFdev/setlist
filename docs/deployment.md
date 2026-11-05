@@ -94,7 +94,7 @@ Transfer work uses **short browser-driven requests**. Source loading, video matc
 
 D1 Free currently includes 5 million rows read/day, 100,000 rows written/day and 5 GB total storage. Track documents are stored separately; metadata and per-user indexes keep steps small. Account grants and every job/state/cache lookup are scoped by the verified Clerk user ID. Quota errors are a pause condition rather than a reason to create a paid resource. See [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) and [D1 limits](https://developers.cloudflare.com/d1/platform/limits/).
 
-YouTube's search and playlist-write quotas remain separate from Cloudflare's allowance. Current defaults allow 100 searches/day; creating a playlist and inserting videos also consume the shared daily units. Large transfers can require multiple days. Match caching, saved progress, and review remain available without an artificial app free-tier cap. See [provider feasibility](research/api-feasibility.md).
+YouTube discovery uses the unofficial YouTube.js library without Google credentials or YouTube Data API search quota. It has no documented throughput guarantee and can fail or be throttled; failures preserve progress for retry. Creating and filling playlists still uses the authenticated official YouTube Data API and its daily quota. Large transfers can require multiple days. See [unofficial discovery research](research/unofficial-youtube.md).
 
 ## First live verification
 
@@ -108,3 +108,23 @@ After deployment, verify one small owned playlist before a large transfer:
 6. Check Worker CPU/errors, D1 row usage and provider quotas.
 
 Live verification and the final domain URL cannot be claimed before the actual accounts, secrets, DNS and remote resources are configured. [MCP configuration](mcp.md) can help with account setup after you authorize the official Cloudflare and Clerk servers.
+
+
+## Invite-only access and daily transfer capacity
+
+Production Setlist Clerk access mode was set to `restricted` (Invite-only) and read back on 2026-11-05. This is enforced by Clerk, including its hosted Account Portal; hiding a sign-up link is not the access control. Existing users retain access. Invite new users from Clerk Dashboard → Invitations and let them accept the Clerk-hosted invitation. When recreating an instance, set Access mode to Invite-only before publishing it. See [Clerk access modes](https://clerk.com/docs/guides/secure/restricting-access).
+
+The capacity target is **1,000 tracks inserted into YouTube per day**, across all invited users, not 1,000 playlists. Code cannot raise Google's project allocation. As verified against [Google's quota calculator](https://developers.google.com/youtube/data/determine_quota_cost) on 2026-11-05:
+
+- Each playlist item insert costs 50 general units. 1,000 inserts require 50,000 units before playlist creation and reads; request at least 60,000 general units/day, adjusting for the number of playlists.
+- Request additional general units through the [YouTube quota extension/audit process](https://developers.google.com/youtube/v3/guides/quota_and_compliance_audits). Approval and throughput are not guaranteed. Confirm the actual allocations in the production Google Cloud project after approval.
+
+Matching uses unofficial YouTube.js discovery for each uncached YouTube query; this does not call the official search endpoint. No Google credentials are required for discovery, but an authorized YouTube connection is required to create and fill the playlist. The library and upstream service do not promise a safe request rate; shared Worker egress, throttling, or upstream changes can interrupt discovery. A successful build or local mock test does not prove deployed Workers compatibility or sustained throughput. Verify a small live transfer and monitor errors before relying on it. Matching uses one discovery search per uncached query. New query results are retained per user for 29 days without sliding expiration. The new discovery cache uses a separate namespace, so old official-search entries are not reused. No cache or quota benefit is assumed for completely new songs. Profile metadata is reused for one hour only when the freshly retrieved Clerk provider token has the same SHA-256 fingerprint. Tokens themselves are not stored in the profile document. Changing authorization invalidates reuse; disconnecting clears workspace documents.
+
+The transfer UI counts processed source tracks, which include cached and unavailable tracks. Its separate matching search/cache counters start when this instrumentation is deployed and exclude manual review searches, other jobs, profile calls, and other users. They count discovery attempts and cache hits, not Google Cloud quota totals. Failed network search attempts count, but a crash before the checkpoint can prevent recording one. Google Cloud request metrics also depend on the selected time window and reporting delay.
+
+Temporary provider 429/rate-limit responses honor Retry-After and bounded backoff. Explicit daily-quota errors pause with a separate label and preserve progress. A generic 429 does not establish daily quota exhaustion. The screenshots alone do not establish the exact production error or reconcile the 89 searches with 101 processed tracks. Matching remains serialized; writes retain their existing pacing and reconciliation safeguards. Keep the workspace open for automatic progress.
+
+Official playlist writes remain sequential: each `playlistItems.insert` adds one video and costs 50 units, while reads and playlist creation add to the total. The official [insert reference](https://developers.google.com/youtube/data/reference/rest/v3/playlistItems/insert) does not describe a multi-video insert or a quota discount for batching. Sequential writes preserve order and allow reconciliation after an uncertain response.
+
+Validation on 2026-11-05: production build and typecheck passed; the local workerd suite exercises real YouTube.js initialization, successful response parsing, canonical video mapping, unauthenticated requests and 429 cooldowns. A small live search from the development machine returned valid tracks. Deployed Cloudflare egress and sustained throughput have not been tested; no authenticated remote playlist writes were performed during these checks.

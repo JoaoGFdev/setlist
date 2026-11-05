@@ -88,7 +88,8 @@ export function Workspace({ userId }: { userId: string }) {
           void client.invalidateQueries({ queryKey: resourceKey(userId, `/jobs/${job.id}`) });
           return;
         }
-        nextStepAt = Date.now() + 1_500;
+        // Keep writes paced; read-only matching no longer needs a 1.5s idle gap.
+        nextStepAt = Date.now() + (summary.phase === 'transferring' ? 1_500 : 250);
         setJobs(current => [summary, ...current.filter(item => item.id !== summary.id)]);
         job = { ...job, ...summary };
         setActiveJob(job);

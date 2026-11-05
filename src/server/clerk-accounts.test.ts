@@ -19,7 +19,11 @@ test('a linked Clerk account with playlist scopes loads the Spotify library with
     if (url.endsWith('/me')) return Response.json({ id: 'spotify-owner', display_name: 'Listener' });
     return Response.json({ items: [{ id: 'playlist', name: 'Favorites', owner: { id: 'spotify-owner' }, tracks: { total: 2 } }] });
   });
-  const store = { userId: 'user_test', credentials: async () => undefined, get: async () => undefined } as unknown as Store;
+  const documents = new Map<string, unknown>();
+  const store = { userId: 'user_test', credentials: async () => undefined,
+    get: async (key: string) => documents.get(key),
+    set: async (key: string, value: unknown) => { documents.set(key, value); },
+  } as unknown as Store;
   const providers = new Providers(store, { CLERK_SECRET_KEY: 'test-clerk-secret' } as AppEnv);
   assert.deepEqual((await providers.credentials('spotify'))?.account, { id: 'spotify-owner', name: 'Listener' });
   const result = await providers.playlists('spotify');

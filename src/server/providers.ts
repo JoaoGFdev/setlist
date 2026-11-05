@@ -4,9 +4,12 @@ import type { AppEnv } from './env';
 import { rank, splitVideoTitle } from './matching';
 import { clerkProviderToken } from './clerk-accounts';
 import { providerScopes } from '../../shared/provider-scopes';
+import { searchYouTube, YouTubeSearchError } from './youtube-search';
 
 type Json = Record<string, unknown>;
 const timeout = 8_000;
+// Leave a day for the scheduled purge before the 30-day retention boundary.
+const SEARCH_CACHE_MS = 29 * 86_400_000;
 const SPOTIFY = 'https://api.spotify.com/v1/';
 const YOUTUBE = 'https://www.googleapis.com/youtube/v3/';
 const configs = {
@@ -58,7 +61,7 @@ async function readResponse(response: Response): Promise<Json> {
     const error = record(body.error);
     const first = Array.isArray(error.errors) ? record(error.errors[0]) : {};
     const reason = str(first.reason);
-    if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded') throw new ServiceError('YouTube daily quota reached. Progress is saved. Resume after the quota resets at midnight Pacific time.', 429);
+    if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded') throw new ServiceError('YouTube daily quota reached. Progress is saved. Resume after the quota resets at midnight Pacific time.', 429, reason);
     if (response.status === 429 || ['rateLimitExceeded', 'userRateLimitExceeded'].includes(reason)) {
       const header = response.headers.get('retry-after');
       const seconds = header && /^\d+(\.\d+)?$/.test(header) ? Number(header) * 1000 : NaN;
@@ -73,8 +76,9 @@ async function readResponse(response: Response): Promise<Json> {
 }
 
 export class Providers {
+  readonly searchUsage = { requests: 0, cacheHits: 0 };
   private readonly clerkAccounts = new Map<Provider, Promise<Credentials | undefined>>();
-  constructor(readonly store: Store, readonly env: AppEnv) {}
+  constructor(readonly store: Store, readonly env: AppEnv, private readonly youtubeSearch: (query: string) => Promise<Track[]> = searchYouTube) {}
   private clerkCredentials(provider: Provider): Promise<Credentials | undefined> {
     const existing = this.clerkAccounts.get(provider);
     if (existing) return existing;
@@ -88,13 +92,23 @@ export class Providers {
     try { token = await clerkProviderToken(this.store.userId, provider, this.env.CLERK_SECRET_KEY); }
     catch { throw new ServiceError('Could not retrieve music-account authorization from Clerk. Please try again.', 502); }
     if (!token) return undefined;
+    // Recheck Clerk authorization every request, but reuse profile metadata for the
+    // same token. A reconnect/token change must resolve the account again.
+    const fingerprint = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))), byte => byte.toString(16).padStart(2, '0')).join('');
+    const profileKey = `provider-profile:${provider}`;
+    const cached = await this.store.get<{ fingerprint: string; expiresAt: number; account: Credentials['account'] }>(profileKey);
+    if (cached && cached.fingerprint === fingerprint && cached.expiresAt > Date.now()) {
+      return { access_token: token, expiresAt: Date.now() + 60_000, account: cached.account };
+    }
     const url = provider === 'spotify' ? `${SPOTIFY}me` : `${YOUTUBE}channels?part=snippet&mine=true`;
     const profile = await readResponse(await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(timeout) }));
     const channel = record(Array.isArray(profile.items) ? profile.items[0] : undefined);
     const id = provider === 'spotify' ? str(profile.id) : str(channel.id);
     if (!id) throw new ServiceError('This Google account needs a YouTube channel. Create one on YouTube, then reconnect.');
     const name = provider === 'spotify' ? str(profile.display_name, id) : str(record(channel.snippet).title, id);
-    return { access_token: token, expiresAt: Date.now() + 60_000, account: { id, name } };
+    const account = { id, name };
+    await this.store.set(profileKey, { fingerprint, account, expiresAt: Date.now() + 3_600_000 });
+    return { access_token: token, expiresAt: Date.now() + 60_000, account };
   }
   async token(provider: Provider): Promise<string> {
     const credentials = await this.store.credentials(provider);
@@ -127,6 +141,7 @@ export class Providers {
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${token}`);
     if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    if (url.pathname.endsWith('/search')) this.searchUsage.requests++;
     return readResponse(await fetch(url, { ...init, headers, signal: AbortSignal.timeout(timeout) }));
   }
   async credentials(provider: Provider) { return await this.store.credentials(provider) || await this.clerkCredentials(provider); }
@@ -254,24 +269,28 @@ export class Providers {
   async search(destination: Provider, source: Track, customQuery?: string): Promise<Candidate[]> {
     const query = customQuery || `${source.artist} ${source.title}${destination === 'youtube' ? ' official music video' : ''}`;
     const cacheKey = destination === 'youtube'
-      ? `search:${destination}:mv-v2:${query.toLowerCase()}`
+      ? `search:${destination}:innertube-mv-v1:${query.toLowerCase()}`
       : `search:${destination}:${query.toLowerCase()}`;
     const cached = await this.store.get<{ at: number; expiresAt: number; tracks: Track[] }>(cacheKey);
     let tracks: Track[];
-    if (cached && Date.now() - cached.at < 7 * 86_400_000) tracks = cached.tracks;
+    if (cached && cached.expiresAt > Date.now() && Date.now() - cached.at < SEARCH_CACHE_MS) {
+      this.searchUsage.cacheHits++;
+      tracks = cached.tracks;
+    }
     else if (destination === 'spotify') {
       const data = await this.api(destination, `search?type=track&limit=5&q=${encodeURIComponent(query)}`);
       tracks = (Array.isArray(record(data.tracks).items) ? record(data.tracks).items as unknown[] : []).map((entry) => this.spotifyTrack(record(entry)));
       const at = Date.now();
-      await this.store.set(cacheKey, { at, expiresAt: at + 7 * 86_400_000, tracks });
+      await this.store.set(cacheKey, { at, expiresAt: at + SEARCH_CACHE_MS, tracks });
     } else {
-      const data = await this.api(destination, `search?part=snippet&type=video&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(query)}`);
-      tracks = (Array.isArray(data.items) ? data.items : []).map((entry) => {
-        const item = record(entry); const id = str(record(item.id).videoId); const snippet = record(item.snippet);
-        return { id, title: str(snippet.title), artist: str(snippet.channelTitle), url: `https://www.youtube.com/watch?v=${id}`, image: youtubeThumbnail(snippet) };
-      });
+      this.searchUsage.requests++;
+      try { tracks = await this.youtubeSearch(query); }
+      catch (error) {
+        if (error instanceof YouTubeSearchError) throw new ServiceError(error.message, error.status, error.reason, error.retryAt);
+        throw new ServiceError('YouTube search is temporarily unavailable. Progress is saved; try again.', 502);
+      }
       const at = Date.now();
-      await this.store.set(cacheKey, { at, expiresAt: at + 7 * 86_400_000, tracks });
+      await this.store.set(cacheKey, { at, expiresAt: at + SEARCH_CACHE_MS, tracks });
     }
     return rank(source, tracks, destination);
   }
