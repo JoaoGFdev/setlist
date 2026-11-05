@@ -130,7 +130,7 @@ test('an insert response lost after remote success is reconciled before the next
 test('quota failures preserve the item cursor and pause without skipping a match', async () => {
   const { store } = setup();
   class Fake extends Providers {
-  override async search(): Promise<Candidate[]> { throw new ServiceError('YouTube daily quota reached. Progress is saved.', 429); }
+  override async search(): Promise<Candidate[]> { throw new ServiceError('YouTube daily quota reached. Progress is saved.', 429, 'quotaExceeded'); }
   }
   const transfers = new Transfers(store, new Fake(store, env));
   const job = makeJob({ phase: 'matching', state: 'running', destinationId: undefined, totalCount: 1, matchPosition: 0 });
@@ -443,4 +443,134 @@ test('rate limits parse numeric and HTTP-date Retry-After headers and distinguis
     (error: unknown) => error instanceof ServiceError && error.retryAt === undefined && /daily quota/.test(error.message));
   await assert.rejects(readResponse(Response.json({ error: { errors: [{ reason: 'userRateLimitExceeded' }] } }, { status: 403 })),
     (error: unknown) => error instanceof ServiceError && error.retryAt! > Date.now());
+});
+
+
+test('Clerk-backed steps reuse the profile only while the provider token is unchanged', async () => {
+  const store = new MemoryStore();
+  const originalFetch = globalThis.fetch;
+  let token = 'first-token';
+  let profiles = 0;
+  globalThis.fetch = async (input) => {
+    if (String(input).includes('api.clerk.com')) return Response.json([{ token, scopes: ['https://www.googleapis.com/auth/youtube.force-ssl'] }]);
+    profiles++;
+    return Response.json({ items: [{ id: token, snippet: { title: 'Channel' } }] });
+  };
+  try {
+    const settings = { ...env, CLERK_SECRET_KEY: 'test-secret' };
+    for (let step = 0; step < 3; step++) {
+      assert.equal((await new Providers(store, settings).credentials('youtube'))?.account.id, token);
+    }
+    assert.equal(profiles, 1);
+    token = 'replacement-token';
+    assert.equal((await new Providers(store, settings).credentials('youtube'))?.account.id, token);
+    assert.equal(profiles, 2);
+    const profile = await store.get<Record<string, unknown>>('provider-profile:youtube');
+    await store.set('provider-profile:youtube', { ...profile, expiresAt: Date.now() - 1 });
+    await new Providers(store, settings).credentials('youtube');
+    assert.equal(profiles, 3);
+    await store.set('connection-disabled:youtube', { disabled: true });
+    assert.equal(await new Providers(store, settings).credentials('youtube'), undefined);
+    assert.equal(profiles, 3);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('YouTube search results remain reusable after seven days without extending their expiry', async () => {
+  const { store } = setup();
+  const at = Date.now() - 8 * 86_400_000;
+  const key = 'search:youtube:innertube-mv-v1:artist song a official music video';
+  const expiresAt = at + 29 * 86_400_000;
+  await store.set(key, { at, expiresAt, tracks: [track('cached')] });
+  const providers = new Providers(store, env, async () => { throw new Error('Unexpected search request'); });
+  const results = await providers.search('youtube', track('a'));
+  assert.equal(results[0].id, 'cached');
+  assert.equal((await store.get<{ expiresAt: number }>(key))?.expiresAt, expiresAt);
+});
+
+
+test('YouTube discovery uses its own search, caches results, and retries a failed position', async () => {
+  const { store } = setup();
+  const job = makeJob({ phase: 'matching', totalCount: 3 });
+  await store.set(`job:${job.id}`, job);
+  await putItems(store, job.id, [track('a'), track('a'), track('b')].map(source => ({ source, candidates: [], selected: null, searched: false })));
+  let requests = 0;
+  const providers = new Providers(store, env, async () => {
+    requests++;
+    if (requests === 2) throw new Error('discovery unavailable');
+    return [{ ...track('video-id'), title: 'Song a', artist: 'Artist', url: 'https://www.youtube.com/watch?v=video-id' }];
+  });
+  const transfers = new Transfers(store, providers);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('Unexpected official API request during discovery'); };
+  try {
+    await transfers.step(job.id);
+    let summary = await transfers.step(job.id);
+    assert.equal(summary.searchRequests, 1);
+    assert.equal(summary.searchCacheHits, 1);
+    await assert.rejects(transfers.step(job.id), /YouTube search is temporarily unavailable/);
+    const paused = await transfers.get(job.id);
+    assert.equal(paused.state, 'paused');
+    assert.equal(paused.matchPosition, 2);
+    assert.equal(paused.items[2].searched, false);
+    await transfers.resume(job.id);
+    summary = await transfers.step(job.id);
+    assert.equal(summary.phase, 'review');
+    assert.equal(requests, 3);
+    assert.equal((await transfers.get(job.id)).items[0].candidates[0].url, 'https://www.youtube.com/watch?v=video-id');
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('official YouTube writes use discovered video IDs and authenticated ordered inserts', async () => {
+  const { store } = setup();
+  const videoIds = ['video-one', 'video-two', 'video-one'];
+  const providers = new Providers(store, env, async () => videoIds.map(id => ({ ...track(id), url: `https://www.youtube.com/watch?v=${id}` })));
+  const originalFetch = globalThis.fetch;
+  const writes: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input));
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer youtube-account-access');
+    assert.equal(init?.method, 'POST');
+    const body = JSON.parse(String(init?.body));
+    if (url.pathname.endsWith('/playlists')) {
+      assert.equal(body.status.privacyStatus, 'private');
+      return Response.json({ id: 'new-playlist' });
+    }
+    assert.ok(url.pathname.endsWith('/playlistItems'));
+    assert.equal(body.snippet.playlistId, 'new-playlist');
+    assert.equal(body.snippet.resourceId.kind, 'youtube#video');
+    writes.push(body.snippet.resourceId.videoId);
+    return Response.json({});
+  };
+  try {
+    const found = await providers.search('youtube', track('a'));
+    const playlist = await providers.createPlaylist('youtube', 'Copy', 'marker');
+    assert.equal(playlist.url, 'https://www.youtube.com/playlist?list=new-playlist');
+    for (const id of videoIds) {
+      const selected = found.find(result => result.id === id)!;
+      assert.equal(selected.url, `https://www.youtube.com/watch?v=${id}`);
+      await providers.insert('youtube', playlist.id, selected.id);
+    }
+    assert.deepEqual(writes, videoIds);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('manual review search uses the discovery adapter and returns its video links', async () => {
+  const { store } = setup();
+  const queries: string[] = [];
+  const providers = new Providers(store, env, async query => {
+    queries.push(query);
+    return [{ ...track('manual-video'), url: 'https://www.youtube.com/watch?v=manual-video' }];
+  });
+  const transfers = new Transfers(store, providers);
+  const job = makeJob({ phase: 'review', state: 'idle', destinationId: undefined, totalCount: 1 });
+  await store.set(`job:${job.id}`, job);
+  await putItems(store, job.id, [{ source: track('a'), candidates: [], selected: null, searched: true }]);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('Unexpected official search'); };
+  try {
+    const result = await transfers.search(job.id, 0, 'custom video query');
+    assert.deepEqual(queries, ['custom video query']);
+    assert.equal(result.items[0].candidates[0].id, 'manual-video');
+    assert.equal(result.items[0].candidates[0].url, 'https://www.youtube.com/watch?v=manual-video');
+  } finally { globalThis.fetch = originalFetch; }
 });

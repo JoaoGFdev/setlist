@@ -50,6 +50,10 @@ export interface JobMetadata {
   message?: string;
   nextStepAt?: number;
   rateLimitAttempts?: number;
+  waitReason?: 'daily-quota' | 'rate-limit';
+  /** Matching-step attempts/cache hits recorded since instrumentation was enabled. */
+  searchRequests?: number;
+  searchCacheHits?: number;
   sourceCursor?: string;
   sourcePosition: number;
   sourceDone: boolean;

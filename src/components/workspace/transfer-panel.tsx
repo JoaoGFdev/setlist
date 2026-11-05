@@ -72,7 +72,7 @@ export function TransferPanel({ job, armed, pausing, onPause, onStart, onUpdate,
   const progressMax = job.phase === 'transferring' ? selected : job.totalCount;
   const progressValue = job.phase === 'loading' ? job.totalCount : job.phase === 'matching' ? matched : job.inserted;
   const phaseBadge = job.state === 'running' && job.nextStepAt && job.nextStepAt > Date.now() ? { label: 'Waiting for rate limit', className: 'bg-warning-muted text-warning' }
-    : job.state === 'paused' ? { label: 'Paused', className: 'bg-warning-muted text-warning' }
+    : job.state === 'paused' ? { label: job.waitReason === 'daily-quota' ? 'Daily quota reached' : 'Paused', className: 'bg-warning-muted text-warning' }
     : job.phase === 'complete' ? { label: phaseLabels.complete, className: 'bg-success-muted text-success' }
       : { label: phaseLabels[job.phase], className: '' };
 
@@ -104,6 +104,7 @@ export function TransferPanel({ job, armed, pausing, onPause, onStart, onUpdate,
       </CardAction>
     </CardHeader>
     <CardContent className="flex flex-col gap-4">
+      {job.searchRequests !== undefined ? <p className="text-xs text-muted-foreground">Matching activity recorded: {job.searchRequests} search requests · {job.searchCacheHits ?? 0} cached results. Track progress also includes unavailable tracks; these are not project-wide API totals.</p> : null}
       {active ? <Progress aria-label="Transfer progress" value={Math.round(100 * progressValue / Math.max(progressMax, 1))} /> : null}
       {job.message ? <Alert role="status"><AlertDescription>{job.message}{job.state === 'running' && job.nextStepAt ? ` Next attempt after ${new Date(job.nextStepAt).toLocaleTimeString()}.` : ''}</AlertDescription></Alert>
         : active && !armed && !busy ? <Alert role="status"><AlertDescription>This transfer stopped when it was last left open. Choose Continue transfer to pick up where it left off.</AlertDescription></Alert> : null}

@@ -119,6 +119,7 @@ export class Transfers {
       if (job.nextStepAt && job.nextStepAt > Date.now()) return job;
       job.nextStepAt = undefined;
       job.message = undefined;
+      job.waitReason = undefined;
       try {
         await this.assertAccounts(job);
         if (job.phase === 'loading') return await this.loadPage(job, token);
@@ -130,12 +131,14 @@ export class Transfers {
           await this.assertLease(token);
           const durable = await this.requiredJob(id);
           if (error instanceof ServiceError && error.retryAt) {
+            durable.waitReason = 'rate-limit';
             durable.rateLimitAttempts = (durable.rateLimitAttempts ?? 0) + 1;
             durable.nextStepAt = Math.max(error.retryAt, Date.now() + Math.min(300_000, 30_000 * 2 ** Math.min(durable.rateLimitAttempts - 1, 4)));
             durable.message = error.message;
             await this.save(durable, token);
             return durable;
           }
+          durable.waitReason = error instanceof ServiceError && ['quotaExceeded', 'dailyLimitExceeded'].includes(error.reason ?? '') ? 'daily-quota' : undefined;
           durable.state = 'paused';
           durable.message = error instanceof Error ? error.message : 'Transfer paused. Retry to continue.';
           await this.save(durable, token);
@@ -173,6 +176,7 @@ export class Transfers {
   }
   private async matchBatch(job: JobSummary, token: string): Promise<JobSummary> {
     // Bound provider requests per invocation; keep writes serialized under the lease.
+    const usageBefore = { ...this.providers.searchUsage };
     const start = job.matchPosition;
     const positions = Array.from({ length: Math.min(1, job.totalCount - start) }, (_, offset) => start + offset);
     const items = await Promise.all(positions.map((position) => this.store.get<JobItem>(itemKey(job.id, position))));
@@ -182,6 +186,8 @@ export class Transfers {
       const candidates = await this.providers.search(job.destination, item!.source);
       return { ...item!, candidates, selected: candidates[0] || null, searched: true };
     }));
+    job.searchRequests = (job.searchRequests ?? 0) + this.providers.searchUsage.requests - usageBefore.requests;
+    job.searchCacheHits = (job.searchCacheHits ?? 0) + this.providers.searchUsage.cacheHits - usageBefore.cacheHits;
     await this.assertLease(token);
     const expiresAt = Date.parse(job.createdAt) + WORKSPACE_RETENTION_MS;
     const entries: Array<{ key: string; value: unknown }> = [];

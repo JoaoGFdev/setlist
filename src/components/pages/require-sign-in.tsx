@@ -27,7 +27,7 @@ function SignedInGate({ header, children }: { header: ReactNode; children: (user
       <EmptyHeader>
         <EmptyMedia variant="icon"><LockIcon /></EmptyMedia>
         <EmptyTitle>Sign in to continue</EmptyTitle>
-        <EmptyDescription>Your connected music accounts and transfers belong to your Setlist account.</EmptyDescription>
+        <EmptyDescription>Setlist is invite-only. Sign in with your existing account, or accept your email invitation.</EmptyDescription>
       </EmptyHeader>
       <EmptyContent><SignInButton mode="modal"><Button variant="brand">Sign in</Button></SignInButton></EmptyContent>
     </Empty></>;

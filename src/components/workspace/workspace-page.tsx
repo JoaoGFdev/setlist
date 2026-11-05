@@ -41,7 +41,7 @@ function AuthSession() {
     <EmptyHeader>
       <EmptyMedia variant="icon"><ArrowLeftRightIcon /></EmptyMedia>
       <EmptyTitle>Sign in to your private workspace</EmptyTitle>
-      <EmptyDescription>Your connected music accounts and transfer reviews belong to your Clerk account.</EmptyDescription>
+      <EmptyDescription>Setlist is invite-only. Sign in with your existing account, or accept the invitation sent to your email.</EmptyDescription>
     </EmptyHeader>
     <EmptyContent><SignInButton mode="modal"><Button variant="brand">Sign in to continue</Button></SignInButton></EmptyContent>
   </Empty>;
