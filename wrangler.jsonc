@@ -20,7 +20,7 @@
       "invocation_logs": true,
     },
   },
-  "triggers": { "crons": ["0 0 * * *"] },
+  "triggers": { "crons": [] },
   "vars": {
     "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc2V0bGlzdC5qb2FvZ2YuZGV2JA",
     "APP_URL": "https://setlist.joaogf.dev",
